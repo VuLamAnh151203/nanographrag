@@ -3,3 +3,4 @@ api_keys.json
 models/
 tests/
 .env
+training_embedding/wandb

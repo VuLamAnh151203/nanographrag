@@ -1,0 +1,38 @@
+# Model
+teacher_model_name : "/home/vulamanh/Documents/nanographrag/models/bge_m3"
+student_model_name : "/home/vulamanh/Documents/nanographrag/models/bge_m3"
+
+
+# training config
+
+
+# Dataset
+source_language : ["en"]
+target_language: ["vi"]
+train_dataset: "sentence-transformers/parallel-sentences-talks"
+val_dataset : "sentence-transformers/parallel-sentences-talks"
+max_sentences_per_language : 12  # Maximum number of  parallel sentences for training
+
+# Training
+output_dir: "output/make-multilingual-"
+student_max_seq_length : 32  # Student model max. lengths for inputs (number of word pieces)
+inference_batch_size : 2  # Batch size at inference
+num_train_epochs : 5  # Train for x epochs
+num_evaluation_steps :  100  # Evaluate performance after every xxxx steps
+
+
+
+## Hyperparameters
+epochs: 2
+lr: 1e-4
+train_batch_size : 1
+seed: 666
+warmup_proportion: 0.05
+gradient_accumulation_steps: 1
+# mixed_precision: bf16
+
+
+## Logging
+log_steps: 10
+# eval_steps: 10
+# log_with: "wandb" # "wandb" or "tensorboard"
