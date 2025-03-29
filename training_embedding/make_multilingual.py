@@ -254,7 +254,6 @@ def main():
         fp16=True,  # Set to False if you get an error that your GPU can't run on FP16
         bf16=False,  # Set to True if you have a GPU that supports BF16
         learning_rate=lr,
-        use_cpu = True,
         # Optional tracking/debugging parameters:
         eval_strategy="steps",
         eval_steps=num_evaluation_steps,
@@ -283,15 +282,15 @@ def main():
 
     # 8. (Optional) save the model to the Hugging Face Hub!
     # It is recommended to run `huggingface-cli login` to log into your Hugging Face account first
-    model_name = student_model_name if "/" not in student_model_name else student_model_name.split("/")[-1]
-    try:
-        student_model.push_to_hub(f"{model_name}-multilingual-{'-'.join(source_languages)}-{'-'.join(target_languages)}")
-    except Exception:
-        logging.error(
-            f"Error uploading model to the Hugging Face Hub:\n{traceback.format_exc()}To upload it manually, you can run "
-            f"`huggingface-cli login`, followed by loading the model using `model = SentenceTransformer({final_output_dir!r})` "
-            f"and saving it using `model.push_to_hub('{model_name}-multilingual-{'-'.join(source_languages)}-{'-'.join(target_languages)}')`."
-        )
+    # model_name = student_model_name if "/" not in student_model_name else student_model_name.split("/")[-1]
+    # try:
+    #     student_model.push_to_hub(f"{model_name}-multilingual-{'-'.join(source_languages)}-{'-'.join(target_languages)}")
+    # except Exception:
+    #     logging.error(
+    #         f"Error uploading model to the Hugging Face Hub:\n{traceback.format_exc()}To upload it manually, you can run "
+    #         f"`huggingface-cli login`, followed by loading the model using `model = SentenceTransformer({final_output_dir!r})` "
+    #         f"and saving it using `model.push_to_hub('{model_name}-multilingual-{'-'.join(source_languages)}-{'-'.join(target_languages)}')`."
+    #     )
 
 if __name__ == "__main__":
     main()

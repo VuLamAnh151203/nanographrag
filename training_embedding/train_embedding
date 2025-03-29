@@ -1,5 +1,5 @@
 #!/bin/bash
-python3 make_multilingual.py --config training_config.yaml
+python3 make_multilingual.py --config training_config.yaml > logs/output.log
 
 
 # if [ ! -d "./output" ]; then
@@ -12,7 +12,7 @@ python3 make_multilingual.py --config training_config.yaml
 #     echo "mkdir logs"
 # fi
 
-#  CUDA_VISIBLE_DEVICES="0"  accelerate launch \
+#  CUDA_VISIBLE_DEVICES=0  accelerate launch \
 #  make_multilingual.py \
 #  --config training_config.yaml  \
 #  > logs/training.log &

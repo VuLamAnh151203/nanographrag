@@ -4,3 +4,5 @@ models/
 tests/
 .env
 training_embedding/wandb
+training_embedding/output
+training_embedding/logs
