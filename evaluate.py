@@ -103,7 +103,10 @@ def average_four_metrics(actual_list, predicted_list, k):
     mrr_at_k_score = mrr_at_k(actual_list, predicted_list, k)
     mean_precision_at_k_score = mean_average_precision_at_k(actual_list, predicted_list, k)
     # nDCG_at_k_score = mean_ndcg_at_k(actual_list, predicted_list,k)
-    print(f"Recall@{k}:{recall_at_k_score}")
-    print(f"MRR@{k}:{mrr_at_k_score}")
-    print(f"MAP@{k}:{mean_precision_at_k_score}")
-    print(f"Average Score: {(recall_at_k_score + mrr_at_k_score + mean_precision_at_k_score) / 3}")
+    results = ""
+    results += f"Recall@{k}:{recall_at_k_score}" + "\n"
+    results += f"MRR@{k}:{mrr_at_k_score}" +"\n"
+    results += f"MAP@{k}:{mean_precision_at_k_score}" +"\n"
+    results += f"Average Score: {(recall_at_k_score + mrr_at_k_score + mean_precision_at_k_score) / 3}" +"\n"
+
+    return results

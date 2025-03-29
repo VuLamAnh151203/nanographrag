@@ -6,6 +6,7 @@ from functools import partial
 from typing import Callable, Dict, List, Optional, Type, Union, cast
 
 import tiktoken
+import logging
 
 
 from ._llm import (
@@ -161,9 +162,13 @@ class GraphRAG:
     # path to store relevant text chunk
     store_query_text_chunks: str = field(default_factory=str)
     store_naive_text_chunks: str = field(default_factory=str)
-
+    enable_log: bool = field(default_factory=lambda : True)
 
     def __post_init__(self):
+        if self.enable_log:
+            logger.setLevel(logging.INFO)
+        else:
+            logger.setLevel(logging.CRITICAL)
         _print_config = ",\n  ".join([f"{k} = {v}" for k, v in asdict(self).items()])
         logger.debug(f"GraphRAG init with param:\n\n  {_print_config}\n")
 

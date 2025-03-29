@@ -1,3 +1,5 @@
 data/
 api_keys.json
 models/
+tests/
+.env

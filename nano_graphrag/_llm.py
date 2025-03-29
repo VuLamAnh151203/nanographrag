@@ -25,11 +25,16 @@ global_azure_openai_async_client = None
 global_amazon_bedrock_async_client = None
 from aiolimiter import AsyncLimiter
 
+from dotenv import load_dotenv
+
+# Load the .env file
+load_dotenv()
+
 rate_limiter = AsyncLimiter(1, time_period=1)   # 1 QPS
 minute_limiter = AsyncLimiter(60, time_period=60) 
 
 def get_together_client_instance():
-    return AsyncTogether(api_key = "d60f0a888b225e1f3f9f44749e52e7335360b56a95578fd42339d95d189db06e")
+    return AsyncTogether(api_key = os.getenv("TOGETHER_AI"))
 
 def get_openai_async_client_instance(api_key):
     global global_openai_async_client
@@ -266,7 +271,7 @@ async def openai_embedding(texts: list[str]) -> np.ndarray:
     )
     return np.array([dp.embedding for dp in response.data])
 
-bge_m3 = SentenceTransformer(model_name_or_path="/home/vulamanh/Documents/GRAPHRAG_DATN/src/models/bge_m3", device="cpu")
+bge_m3 = SentenceTransformer(model_name_or_path=os.getenv("EMBEDDING_MODEL_PATH"), device="cpu")
 @wrap_embedding_func_with_attrs(embedding_dim=1024, max_token_size=8192)
 async def bge_m3_embedding(texts: list[str]) -> np.ndarray:
     # bge_m3 = SentenceTransformer(model_name_or_path="/home/vulamanh/Documents/GRAPHRAG_DATN/src/models/bge_m3", device="cpu")
@@ -347,7 +352,7 @@ async def azure_openai_embedding(texts: list[str]) -> np.ndarray:
     )
     return np.array([dp.embedding for dp in response.data])
 
-with open("/home/vulamanh/Documents/GRAPHRAG_DATN/src/api_keys.json", 'r', encoding='utf-8') as f:
+with open(os.getenv("API_KEYS_PATH"), 'r', encoding='utf-8') as f:
     OPENROUTER_API_KEYS = json.load(f)
 
 import time
@@ -407,7 +412,7 @@ async def gemini_2_0(
             print(f"Using API key: {current_api_key[:5]}...")
             
             response = await openai_complete_if_cache(
-                "google/gemini-2.0-flash-thinking-exp:free",
+                os.getenv("LLM_OPEN_ROUTER_MODEL"),
                 prompt,
                 system_prompt=system_prompt,
                 history_messages=history_messages,
