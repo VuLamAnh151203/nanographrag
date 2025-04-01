@@ -240,7 +240,7 @@ def main():
 
     import wandb
     wandb.login(key="a8d0d50fff812d2ec1a28913152be37181854c8e")
-    wandb.init(project="constrastive_loss", name="test_29_3")
+    wandb.init(project="constrastive_loss", name="test_29_3_2")
     # 5. Define the training arguments
     args = SentenceTransformerTrainingArguments(
         # Required parameter:
