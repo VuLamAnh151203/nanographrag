@@ -1,5 +1,5 @@
 #!/bin/bash
-CUDA_VISIBLE_DEVICES=0,1 python3 make_multilingual.py --config training_config.yaml
+CUDA_VISIBLE_DEVICES=0,1 python3 make_multilingual.py --config training_config.yaml > logs/output.log
 
 
 # if [ ! -d "./output" ]; then
