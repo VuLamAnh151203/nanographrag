@@ -6,3 +6,4 @@ tests/
 training_embedding/wandb
 training_embedding/output
 training_embedding/logs
+flag_embedding_train/

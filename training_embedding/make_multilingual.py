@@ -23,6 +23,7 @@ from datetime import datetime
 
 import numpy as np
 from datasets import DatasetDict, load_dataset, Dataset
+import os
 
 from sentence_transformers import LoggingHandler, SentenceTransformer
 from sentence_transformers.evaluation import (
@@ -34,6 +35,7 @@ from sentence_transformers.evaluation import (
 from sentence_transformers.losses import MSELoss
 from sentence_transformers.trainer import SentenceTransformerTrainer
 from sentence_transformers.training_args import SentenceTransformerTrainingArguments
+from transformers import TrainerCallback
 
 logging.basicConfig(
     format="%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S", level=logging.INFO, handlers=[LoggingHandler()]
@@ -71,6 +73,7 @@ def parse_args():
 
     # parser.add_argument("--log_with", type=str, default='wandb', help='wandb,tensorboard')
     parser.add_argument("--log_steps", type=int, default=10)
+    parser.add_argument("--eval_file", type = str)
 
     args = parser.parse_args()
 
@@ -82,6 +85,22 @@ def parse_args():
 
     return args
 
+class RefreshEvalResultsCallback(TrainerCallback):
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        # Clear (or create) the file at the beginning of training
+        with open(self.file_path, "w") as f:
+            f.write("")
+        return control
+
+    def on_evaluate(self, args, state, control, metrics, **kwargs):
+        # Append evaluation metrics to file for this evaluation
+        with open(self.file_path, "a") as f:
+            f.write(f"Step {state.global_step} - Metrics: {metrics}\n")
+        return control
+    
 def main():
 
     args = parse_args()
@@ -113,6 +132,8 @@ def main():
         + "-"
         + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     )
+
+    eval_path = os.path.join(output_dir, args.eval_file)
 
     # 1a. Here we define our SentenceTransformer teacher model.
     teacher_model = SentenceTransformer(teacher_model_name)
@@ -152,7 +173,7 @@ def main():
                 logging.info(
                     f"Could not load dataset {dataset_to_eval}/{source_lang}-{target_lang} dev split, splitting 1k samples from train"
                 )
-                dataset = train_dataset.train_test_split(test_size=10, shuffle=True)
+                dataset = train_dataset.train_test_split(test_size=1000, shuffle=True)
                 train_dataset = dataset["train"]
                 eval_dataset = dataset["test"]
 
@@ -240,9 +261,9 @@ def main():
 
     import wandb
     wandb.login(key="a8d0d50fff812d2ec1a28913152be37181854c8e")
-    wandb.init(project="constrastive_loss", name="test_29_3")
+    wandb.init(project="constrastive_loss", name=output_dir)
     # 5. Define the training arguments
-    args = SentenceTransformerTrainingArguments(
+    training_args = SentenceTransformerTrainingArguments(
         # Required parameter:
         output_dir=output_dir,
         # Optional training parameters:
@@ -266,11 +287,12 @@ def main():
     # 6. Create the trainer & start training
     trainer = SentenceTransformerTrainer(
         model=student_model,
-        args=args,
+        args=training_args,
         train_dataset=train_dataset_dict,
         eval_dataset=eval_dataset_dict,
         loss=train_loss,
         evaluator=evaluator,
+        callbacks = [RefreshEvalResultsCallback(eval_path)]
     )
 
 
