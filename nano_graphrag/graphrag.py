@@ -20,7 +20,7 @@ from ._llm import (
     azure_gpt_4o_mini_complete,
     llama_3_1_8B_Turbo_together,
     bge_m3_embedding,
-    gemini_2_0
+    qwen
 )
 from ._op import (
     chunking_by_token_size,
@@ -134,11 +134,11 @@ class GraphRAG:
     best_model_id: str = "us.anthropic.claude-3-sonnet-20240229-v1:0"
     cheap_model_id: str = "us.anthropic.claude-3-haiku-20240307-v1:0"
     # best_model_func: callable = gpt_4o_complete
-    best_model_func: callable = gemini_2_0
+    best_model_func: callable = qwen
     best_model_max_token_size: int = 32768
     best_model_max_async: int = 16
     # cheap_model_func: callable = gpt_4o_mini_complete
-    cheap_model_func: callable = gemini_2_0
+    cheap_model_func: callable = qwen
     cheap_model_max_token_size: int = 32768
     cheap_model_max_async: int = 16
     model_name : str = "gemini_2_0"
@@ -273,9 +273,6 @@ class GraphRAG:
             partial(self.cheap_model_func, hashing_kv=self.llm_response_cache)
         )
 
-    def insert(self, string_or_strings):
-        loop = always_get_an_event_loop()
-        return loop.run_until_complete(self.ainsert(string_or_strings))
 
     def query(self, query: str, param: QueryParam = QueryParam()):
         loop = always_get_an_event_loop()
@@ -319,6 +316,10 @@ class GraphRAG:
             raise ValueError(f"Unknown mode {param.mode}")
         await self._query_done()
         return response
+
+    def insert(self, string_or_strings):
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.ainsert(string_or_strings))
 
     async def ainsert(self, string_or_strings):
         await self._insert_start()

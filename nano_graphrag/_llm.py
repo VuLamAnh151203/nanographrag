@@ -271,11 +271,15 @@ async def openai_embedding(texts: list[str]) -> np.ndarray:
     )
     return np.array([dp.embedding for dp in response.data])
 
-bge_m3 = SentenceTransformer(model_name_or_path=os.getenv("EMBEDDING_MODEL_PATH"), device="cpu")
+from FlagEmbedding import BGEM3FlagModel
+bge_m3 = BGEM3FlagModel(os.getenv("EMBEDDING_MODEL_PATH"),  
+                       use_fp16=True, device = "cuda:0")
+# bge_m3 = SentenceTransformer(model_name_or_path=os.getenv("EMBEDDING_MODEL_PATH"), device="cpu")
 @wrap_embedding_func_with_attrs(embedding_dim=1024, max_token_size=8192)
 async def bge_m3_embedding(texts: list[str]) -> np.ndarray:
     # bge_m3 = SentenceTransformer(model_name_or_path="/home/vulamanh/Documents/GRAPHRAG_DATN/src/models/bge_m3", device="cpu")
-    return bge_m3.encode(texts, normalize_embeddings=True,show_progress_bar=False)
+    # return bge_m3.encode(texts, normalize_embeddings=True,show_progress_bar=False)
+    return bge_m3.encode(texts, max_length = 8192)["dense_vecs"]
 
 @retry(
     stop=stop_after_attempt(3),
@@ -352,8 +356,8 @@ async def azure_openai_embedding(texts: list[str]) -> np.ndarray:
     )
     return np.array([dp.embedding for dp in response.data])
 
-with open(os.getenv("API_KEYS_PATH"), 'r', encoding='utf-8') as f:
-    OPENROUTER_API_KEYS = json.load(f)
+# with open(os.getenv("API_KEYS_PATH"), 'r', encoding='utf-8') as f:
+#     OPENROUTER_API_KEYS = json.load(f)
 
 import time
 import random
@@ -396,47 +400,77 @@ class APIManager:
 
 
 # Khởi tạo API Manager
-api_manager = APIManager(OPENROUTER_API_KEYS)
+# api_manager = APIManager(OPENROUTER_API_KEYS)
 
 # Giữ nguyên hàm bất đồng bộ này
-async def gemini_2_0(
-    prompt, system_prompt=None, history_messages=[], **kwargs
-) -> str:
-    max_retries = len(OPENROUTER_API_KEYS)
-    retry_count = 0
+# async def gemini_2_0(
+#     prompt, system_prompt=None, history_messages=[], **kwargs
+# ) -> str:
+#     max_retries = len(OPENROUTER_API_KEYS)
+#     retry_count = 0
     
+#     while retry_count < max_retries:
+#         try:
+#             current_api_key = api_manager.get_current_api_key()
+#             # os["OPENAI_API_KEY"] = current_api_key
+#             print(f"Using API key: {current_api_key[:5]}...")
+            
+#             response = await openai_complete_if_cache(
+#                 os.getenv("LLM_OPEN_ROUTER_MODEL"),
+#                 prompt,
+#                 system_prompt=system_prompt,
+#                 history_messages=history_messages,
+#                 api_key = current_api_key,
+#                 base_url=os.getenv("LLM_BINDING_HOST", "https://openrouter.ai/api/v1"),
+#                 **kwargs
+#             )
+            
+#             # Nếu thành công, đánh dấu key này hoạt động tốt
+#             api_manager.reset_key(api_manager.current_key_index)
+#             return response
+            
+#         except Exception as e:
+#             print(f"Error with API key {api_manager.current_key_index}: {str(e)}")
+#             retry_count += 1
+            
+#             if retry_count < max_retries:
+#                 print(f"Switching to next API key...")
+#                 api_manager.switch_to_next_key()
+#             else:
+#                 print("All API keys have failed. Raising error.")
+#                 raise e
+    
+#     raise RuntimeError("All API keys have failed")
+
+async def qwen(
+    prompt, system_prompt=None, history_messages=[], keyword_extraction=False, **kwargs
+) -> str:
+ 
+    max_retries = 10
+    retry_count = 0
+    model = os.getenv("LLM_MODEL", "qwen/qwen-2.5-7b-instruct")
     while retry_count < max_retries:
         try:
-            current_api_key = api_manager.get_current_api_key()
-            # os["OPENAI_API_KEY"] = current_api_key
-            print(f"Using API key: {current_api_key[:5]}...")
-            
             response = await openai_complete_if_cache(
-                os.getenv("LLM_OPEN_ROUTER_MODEL"),
+                model,
                 prompt,
                 system_prompt=system_prompt,
                 history_messages=history_messages,
-                api_key = current_api_key,
+                api_key=os.getenv("LLM_BINDING_API_KEY"), 
                 base_url=os.getenv("LLM_BINDING_HOST", "https://openrouter.ai/api/v1"),
                 **kwargs
             )
             
-            # Nếu thành công, đánh dấu key này hoạt động tốt
-            api_manager.reset_key(api_manager.current_key_index)
             return response
             
         except Exception as e:
-            print(f"Error with API key {api_manager.current_key_index}: {str(e)}")
+            print(f"Lỗi tại lần: {str(retry_count)}/{str(max_retries)}")
             retry_count += 1
             
-            if retry_count < max_retries:
-                print(f"Switching to next API key...")
-                api_manager.switch_to_next_key()
-            else:
-                print("All API keys have failed. Raising error.")
-                raise e
     
-    raise RuntimeError("All API keys have failed")
+    raise RuntimeError("Tất cả API keys đều đã thất bại")
+
+print(f"Loading model...{os.getenv('LLM_MODEL')}")
 
 
 async def openai_complete_if_cache(

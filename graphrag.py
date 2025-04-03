@@ -18,30 +18,30 @@ from evaluate import average_four_metrics
 load_dotenv()
 
 
-def get_text_chunks(df: pd.DataFrame, n_queries = 20):
-    # Lấy hết câu hỏi khác nhau
-    all_distinct_queries = df["query"].unique()
+# def get_text_chunks(df: pd.DataFrame, n_queries = 20):
+#     # Lấy hết câu hỏi khác nhau
+#     all_distinct_queries = df["query"].unique()
 
-    # Obtain the small subset of questions (20 first questions)
-    small_queries_list = all_distinct_queries[:n_queries]
+#     # Obtain the small subset of questions (20 first questions)
+#     small_queries_list = all_distinct_queries[:n_queries]
 
-    # Take the all chunks related to that subset of questions
-    df_small = df[df["query"].isin(small_queries_list)]
-    list_contexts = df_small["pos"].to_list()
-    list_contexts = list(set([a[0] for a in list_contexts]))
+#     # Take the all chunks related to that subset of questions
+#     df_small = df[df["query"].isin(small_queries_list)]
+#     list_contexts = df_small["pos"].to_list()
+#     list_contexts = list(set([a[0] for a in list_contexts]))
 
-    #Build the dictionary with key is the query and value is list of indexes of relevant chunks
-    true_pos = {}
-    map_contexts_to_id = {contexts: i for i, contexts in enumerate(list_contexts)}
-    for query in tqdm(small_queries_list):
-        pos_list = []
-        df_query_specific = df[df["query"] == query]
-        df_query_specific.reset_index(inplace = True)
-        for i in range(len(df_query_specific)):
-            pos_list.append(map_contexts_to_id[df_query_specific["pos"][i][0]])
-        true_pos[query] = list(set(pos_list))
+#     #Build the dictionary with key is the query and value is list of indexes of relevant chunks
+#     true_pos = {}
+#     map_contexts_to_id = {contexts: i for i, contexts in enumerate(list_contexts)}
+#     for query in tqdm(small_queries_list):
+#         pos_list = []
+#         df_query_specific = df[df["query"] == query]
+#         df_query_specific.reset_index(inplace = True)
+#         for i in range(len(df_query_specific)):
+#             pos_list.append(map_contexts_to_id[df_query_specific["pos"][i][0]])
+#         true_pos[query] = list(set(pos_list))
 
-    return list_contexts, true_pos
+#     return list_contexts, true_pos
 
 def remove_if_exist(file):
     if os.path.exists(file):
@@ -59,7 +59,7 @@ def init_graph(WORKING_DIR:str, enable_log = True):
 
     return rag
 
-def build_graph(WORKING_DIR: str):
+def build_graph(WORKING_DIR: str, DATA_DIR: str):
     if os.path.exists(WORKING_DIR):
         shutil.rmtree(WORKING_DIR)  # Remove existing folder
     os.makedirs(WORKING_DIR, exist_ok=True)
@@ -69,20 +69,24 @@ def build_graph(WORKING_DIR: str):
     remove_if_exist(f"{WORKING_DIR}/kv_store_community_reports.json")
     remove_if_exist(f"{WORKING_DIR}/graph_chunk_entity_relation.graphml")
     # access data
-    table  = pa.read_table("/home/vulamanh/Documents/GRAPHRAG_DATN/src/data/synthetic/cross_queries.parquet")
-    df = table.to_pandas()
+    # table  = pa.read_table("/home/vulamanh/Documents/GRAPHRAG_DATN/src/data/synthetic/cross_queries.parquet")
+    # df = table.to_pandas()
 
-    # get text chunks
-    list_context, true_pos = get_text_chunks(df, n_queries=int(os.getenv("N_QUERIES")))
+    # # get text chunks
+    # list_context, true_pos = get_text_chunks(df, n_queries=int(os.getenv("N_QUERIES")))
 
-    with open(os.path.join(WORKING_DIR, "true_pos.json"), "w") as f:
-        json.dump(true_pos, f)
+    # with open(os.path.join(WORKING_DIR, "true_pos.json"), "w") as f:
+    #     json.dump(true_pos, f)
+
+    with open(DATA_DIR, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    data = [item[0] for item in data]
 
     # init graph
     graghrag = init_graph(WORKING_DIR)
 
     # insert data:
-    graghrag.insert(list_context)
+    graghrag.insert(data[:30])
 
 def query(root:str, method: str, query: str):
     graphrag = init_graph(root,enable_log = False)
@@ -144,6 +148,7 @@ def main():
     parser = argparse.ArgumentParser(description="GraphRAG CLI")
     parser.add_argument("command", choices=["query", "index", "evaluate"], help="Command to run")
     parser.add_argument("--root", required=True, help="Root directory")
+    parser.add_argument("--data_dir")
     parser.add_argument("--method", help="Processing method")
     parser.add_argument("--query", help="Query text")
     parser.add_argument("--evaluate_k", help = "Top k considered chunks")
@@ -153,7 +158,7 @@ def main():
     if args.command == "index":
         print("CREATE THE GRAPHRAG...")
         # build the graph
-        build_graph(args.root)
+        build_graph(args.root, args.data_dir)
     elif args.command == "query": 
         print(query(args.root, args.method, args.query))
 
