@@ -601,8 +601,8 @@ Truy vấn: "Thương mại quốc tế ảnh hưởng như thế nào đến s�
 ################
 Output:
 {
-  "high_level_keywords": ["Thương mại quốc tế", "Ổn định kinh tế toàn cầu", "Tác động kinh tế"],
-  "low_level_keywords": ["Hiệp định thương mại", "Thuế quan", "Tỷ giá hối đoái", "Hàng nhập khẩu", "Hàng xuất khẩu"]
+  "high_level_keywords":["Hiệp định thương mại", "Thuế quan", "Tỷ giá hối đoái", "Hàng nhập khẩu", "Hàng xuất khẩu"],
+  "low_level_keywords": ["Thương mại quốc tế", "Ổn định kinh tế toàn cầu", "Tác động kinh tế"]
 }
 #############################""",
     """Ví dụ 2:
@@ -611,8 +611,8 @@ Truy vấn: "Hậu quả môi trường của nạn phá rừng đối với đa
 ################
 Output:
 {
-  "high_level_keywords": ["Hậu quả môi trường", "Phá rừng", "Mất đa dạng sinh học"],
-  "low_level_keywords": ["Tuyệt chủng loài", "Phá hủy môi trường sống", "Phát thải carbon", "Rừng nhiệt đới", "Hệ sinh thái"]
+  "high_level_keywords": ["Tuyệt chủng loài", "Phá hủy môi trường sống", "Phát thải carbon", "Rừng nhiệt đới", "Hệ sinh thái"],
+  "low_level_keywords": ["Hậu quả môi trường", "Phá rừng", "Mất đa dạng sinh học"]
 }
 #############################""",
     """Ví dụ 3:
@@ -621,11 +621,43 @@ Truy vấn: "Vai trò của giáo dục trong việc giảm nghèo là gì?"
 ################
 Output:
 {
-  "high_level_keywords": ["Giáo dục", "Giảm nghèo", "Phát triển kinh tế xã hội"],
-  "low_level_keywords": ["Tiếp cận trường học", "Tỷ lệ biết chữ", "Đào tạo nghề", "Bất bình đẳng thu nhập"]
+  "high_level_keywords": ["Tiếp cận trường học", "Tỷ lệ biết chữ", "Đào tạo nghề", "Bất bình đẳng thu nhập"],
+  "low_level_keywords": ["Giáo dục", "Giảm nghèo", "Phát triển kinh tế xã hội"]
 }
 #############################""",
 ]
+# PROMPTS["keywords_extraction_examples_VI"] = [
+#     """Ví dụ 1:
+
+# Truy vấn: "Thương mại quốc tế ảnh hưởng như thế nào đến sự ổn định kinh tế toàn cầu?"
+# ################
+# Output:
+# {
+#   "high_level_keywords": ["Thương mại quốc tế", "Ổn định kinh tế toàn cầu", "Tác động kinh tế"],
+#   "low_level_keywords": ["Hiệp định thương mại", "Thuế quan", "Tỷ giá hối đoái", "Hàng nhập khẩu", "Hàng xuất khẩu"]
+# }
+# #############################""",
+#     """Ví dụ 2:
+
+# Truy vấn: "Hậu quả môi trường của nạn phá rừng đối với đa dạng sinh học là gì?"
+# ################
+# Output:
+# {
+#   "high_level_keywords": ["Hậu quả môi trường", "Phá rừng", "Mất đa dạng sinh học"],
+#   "low_level_keywords": ["Tuyệt chủng loài", "Phá hủy môi trường sống", "Phát thải carbon", "Rừng nhiệt đới", "Hệ sinh thái"]
+# }
+# #############################""",
+#     """Ví dụ 3:
+
+# Truy vấn: "Vai trò của giáo dục trong việc giảm nghèo là gì?"
+# ################
+# Output:
+# {
+#   "high_level_keywords": ["Giáo dục", "Giảm nghèo", "Phát triển kinh tế xã hội"],
+#   "low_level_keywords": ["Tiếp cận trường học", "Tỷ lệ biết chữ", "Đào tạo nghề", "Bất bình đẳng thu nhập"]
+# }
+# #############################""",
+# ]
 
 # ... existing code ...
 

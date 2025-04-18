@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import tiktoken
 
-from lightrag.prompt import PROMPTS
+from lightrag.prompt_old import PROMPTS
 
 
 VERBOSE_DEBUG = os.getenv("VERBOSE", "false").lower() == "true"

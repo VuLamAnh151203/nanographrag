@@ -40,7 +40,11 @@ class QueryParam:
     - "naive": Performs a basic search without advanced techniques.
     - "mix": Integrates knowledge graph and vector retrieval.
     """
+    unique_entity_edge: bool = False
+    retrieval_mode: str = "original"
+    retrieval_nodes: bool = False
 
+    ll_keyword_only: bool = False
     only_need_context: bool = False
     """If True, only returns the retrieved context without generating a response."""
 
@@ -60,11 +64,11 @@ class QueryParam:
     """Maximum number of tokens allowed for each retrieved text chunk."""
 
     max_token_for_global_context: int = int(
-        os.getenv("MAX_TOKEN_RELATION_DESC", "4000")
+        os.getenv("MAX_TOKEN_RELATION_DESC", "20000")
     )
     """Maximum number of tokens allocated for relationship descriptions in global retrieval."""
 
-    max_token_for_local_context: int = int(os.getenv("MAX_TOKEN_ENTITY_DESC", "4000"))
+    max_token_for_local_context: int = int(os.getenv("MAX_TOKEN_ENTITY_DESC", "8000"))
     """Maximum number of tokens allocated for entity descriptions in local retrieval."""
 
     hl_keywords: list[str] = field(default_factory=list)
@@ -103,7 +107,7 @@ class StorageNameSpace(ABC):
 @dataclass
 class BaseVectorStorage(StorageNameSpace, ABC):
     embedding_func: EmbeddingFunc
-    cosine_better_than_threshold: float = field(default=0.2)
+    cosine_better_than_threshold: float = field(default=0.5)
     meta_fields: set[str] = field(default_factory=set)
 
     @abstractmethod

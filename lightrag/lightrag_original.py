@@ -20,7 +20,7 @@ from .base import (
     StoragesStatus,
 )
 from .namespace import NameSpace, make_namespace
-from .operate import (
+from .operate_old import (
     chunking_by_token_size,
     extract_entities,
     extract_keywords_only,
@@ -29,7 +29,7 @@ from .operate import (
     mix_kg_vector_query,
     naive_query,
 )
-from .prompt import GRAPH_FIELD_SEP
+from .prompt_old import GRAPH_FIELD_SEP
 from .utils import (
     EmbeddingFunc,
     compute_mdhash_id,
