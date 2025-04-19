@@ -3133,7 +3133,7 @@ async def retrieve_edge_details_for_recall(
                 "kg_weight": None,
                 "kg_keywords": None
             }
-            logger.debug(f"Edge with key {edge_key} not found in KG or had no data.")
+            # logger.info(f"Edge with key {edge_key} not found in KG or had no data.")
 
 
     # 4. Kết hợp thông tin từ VDB (đã lọc) và KG
