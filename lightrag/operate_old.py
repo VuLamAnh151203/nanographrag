@@ -2621,3 +2621,591 @@ async def kg_query_with_keywords(
         ),
     )
     return response
+
+
+
+async def retrieve_node_details_for_recall(
+    query: str,
+    entities_vdb: BaseVectorStorage,
+    knowledge_graph_inst: BaseGraphStorage,
+    # text_chunks_db: BaseKVStorage, # Tùy chọn: Nếu bạn muốn lấy cả nội dung chunk gốc
+    query_param: QueryParam,
+) -> list[dict]:
+    """
+    Truy vấn vector store của thực thể (entities_vdb) dựa trên query,
+    sau đó lấy mô tả và *tất cả* chunk ID gốc của node từ knowledge graph.
+
+    Hàm này trả về danh sách các dictionary, mỗi dict đại diện cho một *kết quả truy vấn VDB*,
+    chứa thông tin về thực thể liên quan, điểm số, chunk ID gây ra truy vấn,
+    và danh sách tất cả chunk ID của thực thể đó trong KG.
+
+    Args:
+        query: Chuỗi truy vấn đầu vào.
+        entities_vdb: Instance của BaseVectorStorage cho thực thể.
+        knowledge_graph_inst: Instance của BaseGraphStorage.
+        # text_chunks_db: (Tùy chọn) Instance BaseKVStorage nếu muốn lấy nội dung text chunk.
+        query_param: Instance của QueryParam, chủ yếu để lấy top_k.
+
+    Returns:
+        Một list các dictionary, mỗi dict chứa:
+        - 'entity_name' (str): Tên của thực thể liên quan đến VDB hit.
+        - 'kg_description' (str | None): Mô tả của thực thể từ knowledge graph.
+        - 'retrieved_chunk_id' (str): ID của chunk cụ thể từ VDB hit.
+        - 'score' (float): Điểm tương đồng (thường là distance) từ VDB hit.
+        - 'all_kg_chunk_ids' (list[str]): Danh sách tất cả chunk ID của thực thể này trong KG.
+        # - 'all_kg_chunks_content' (list[str] | None): (Tùy chọn) Nội dung của các chunk gốc.
+        - 'entity_appearance_count' (int | None): Số lần entity_name xuất hiện trong KQ VDB ban đầu (chỉ có khi unique_entity_edge=True).
+        - 'triggering_chunk_appearance_count' (int | None): Số lần retrieved_chunk_id xuất hiện trong KQ VDB ban đầu (chỉ có khi unique_entity_edge=True).
+    """
+    logger.info(
+        f"Retrieving node details for recall: '{query}', top_k: {query_param.top_k}"
+    )
+
+    # 1. Truy vấn Vector Store của Thực thể (entities_vdb)
+    try:
+        vdb_results = await entities_vdb.query(query, top_k=query_param.top_k)
+    except Exception as e:
+        logger.error(f"Error querying entities_vdb: {e}")
+        return []
+
+    if not vdb_results:
+        logger.warning("No results found in entities_vdb for query.")
+        return []
+
+    # --- Revised Step 2: Filter VDB results and Count Appearances during filtering ---
+    from collections import Counter # Ensure Counter is imported if not already
+    entity_counts = Counter()
+    chunk_counts = Counter()
+    result_chosen = []
+    top_k_candidates = 100 # Limit for candidates after filtering
+
+    if getattr(query_param, 'unique_entity_edge', False):
+        logger.debug("Filtering for unique entities AND unique triggering chunks, counting appearances until limit.")
+        seen_entities = set()
+        seen_triggering_chunks = set() # Thêm set để theo dõi chunk đã dùng để trigger
+        for result in vdb_results: # Iterate through original VDB results
+            entity_name = result.get("entity_name")
+            chunk_id = result.get("chunk_id")
+            distance = result.get("distance")
+
+            # Basic validation before counting or processing
+            if entity_name and chunk_id is not None and distance is not None:
+                try:
+                    float(distance) # Validate distance format
+                except (ValueError, TypeError):
+                    logger.warning(f"Skipping result due to invalid distance: {result}")
+                    continue # Skip this result entirely
+
+                # Increment counts regardless of whether it's chosen
+                entity_counts[entity_name] += 1
+                chunk_counts[chunk_id] += 1
+
+                # Check for uniqueness of BOTH entity and triggering chunk
+                if entity_name not in seen_entities and chunk_id not in seen_triggering_chunks:
+                    seen_entities.add(entity_name)
+                    seen_triggering_chunks.add(chunk_id) # Đánh dấu chunk này đã được dùng để trigger
+
+                    # Get current counts accumulated so far
+                    current_entity_count = entity_counts[entity_name]
+                    current_chunk_count = chunk_counts[chunk_id]
+
+                    result_chosen.append({
+                        **result,
+                        "entity_appearance_count": current_entity_count,
+                        "chunk_appearance_count": current_chunk_count
+                    })
+
+                    # Check if we have enough candidates AFTER adding
+                    if len(result_chosen) >= top_k_candidates:
+                        logger.debug(f"Reached top {top_k_candidates} unique (entity, triggering_chunk) pairs. Stopping filtering.")
+                        break # Stop processing further vdb_results
+                # else: Bỏ qua nếu entity đã thấy HOẶC chunk trigger đã thấy
+                elif entity_name not in seen_entities and chunk_id in seen_triggering_chunks:
+                     logger.debug(f"Skipping entity '{entity_name}' because triggering chunk '{chunk_id}' was already used.")
+                # Implicitly skips if entity_name in seen_entities
+
+            # else: skip results missing entity/chunk_id or distance
+
+    else: # Filter for unique chunks
+        logger.debug("Filtering for unique chunks, counting appearances until limit.")
+        seen_chunk_ids = set()
+        for result in vdb_results: # Iterate through original VDB results
+            entity_name = result.get("entity_name")
+            chunk_id = result.get("chunk_id")
+            distance = result.get("distance")
+
+            # Basic validation before counting or processing
+            if entity_name and chunk_id is not None and distance is not None:
+                try:
+                    float(distance) # Validate distance format
+                except (ValueError, TypeError):
+                    logger.warning(f"Skipping result due to invalid distance: {result}")
+                    continue # Skip this result entirely
+
+                # Increment counts for the valid result being processed
+                entity_counts[entity_name] += 1
+                chunk_counts[chunk_id] += 1
+
+                # Check for uniqueness *after* counting
+                if chunk_id not in seen_chunk_ids:
+                    seen_chunk_ids.add(chunk_id)
+                    # Get current counts accumulated so far
+                    current_entity_count = entity_counts[entity_name] # Count for the entity associated with this chunk
+                    current_chunk_count = chunk_counts[chunk_id]
+
+                    result_chosen.append({
+                        **result,
+                        "entity_appearance_count": current_entity_count,
+                        "chunk_appearance_count": current_chunk_count
+                    })
+
+                    # Check if we have enough candidates AFTER adding
+                    if len(result_chosen) >= top_k_candidates:
+                        logger.debug(f"Reached top {top_k_candidates} unique chunks. Stopping filtering.")
+                        break # Stop processing further vdb_results
+            # else: skip results missing entity/chunk_id or distance
+
+    if not result_chosen:
+        logger.warning("No results left after filtering VDB hits based on mode.")
+        return []
+
+    logger.info(f"Filtered VDB results down to {len(result_chosen)} candidates based on mode, with counts accumulated during filtering.")
+
+    # --- End of Revised Step 2 ---
+
+    # Steps 3 and 4 (KG fetch and final assembly) remain the same
+    # as they already expect the counts in `result_chosen`.
+
+    # 3. Chuẩn bị lấy thông tin từ Knowledge Graph (từ kết quả đã lọc)
+    node_names_to_fetch = set()
+    processed_vdb_results = []
+    for result in result_chosen: # Sử dụng kết quả đã lọc (giờ luôn có counts)
+        entity_name = result.get("entity_name")
+        chunk_id = result.get("chunk_id")
+        score = result.get("distance")
+        vdb_hit_description = result.get("description", "UNKNOWN_VDB_DESCRIPTION") # Lấy description từ VDB hit
+        # Lấy appearance counts (giờ luôn có giá trị từ bước trước)
+        entity_appearance_count = result.get("entity_appearance_count")
+        chunk_appearance_count = result.get("chunk_appearance_count") # Đã đổi tên
+
+        # Kiểm tra lại lần nữa (mặc dù đã lọc ở trên) và chuyển đổi score
+        if entity_name and chunk_id is not None and score is not None:
+            try:
+                float_score = float(score)
+                node_names_to_fetch.add(entity_name)
+                processed_vdb_results.append({
+                    "entity_name": entity_name,
+                    "retrieved_chunk_id": chunk_id,
+                    "score": float_score,
+                    "vdb_hit_description": vdb_hit_description, # Thêm VDB description vào đây
+                    "entity_appearance_count": entity_appearance_count,
+                    "chunk_appearance_count": chunk_appearance_count
+                })
+            except (ValueError, TypeError) as e:
+                 logger.warning(f"Could not convert score '{score}' to float for filtered entity '{entity_name}', chunk '{chunk_id}'. Skipping. Error: {e}")
+        # else: Lỗi này không nên xảy ra nếu pre-validation hoạt động đúng
+
+    if not node_names_to_fetch:
+        logger.warning("No valid entity names found in filtered VDB results to fetch from KG.")
+        return []
+
+    # Lấy thông tin node từ KG bất đồng bộ
+    node_fetch_tasks = [knowledge_graph_inst.get_node(name) for name in node_names_to_fetch]
+    try:
+        fetched_node_data_list = await asyncio.gather(*node_fetch_tasks)
+    except Exception as e:
+        logger.error(f"Error fetching node data from knowledge graph: {e}")
+        fetched_node_data_list = [None] * len(node_names_to_fetch)
+
+    # Tạo map từ tên node sang thông tin KG (description và chunk IDs)
+    kg_node_info_map = {}
+    for name, node_data in zip(node_names_to_fetch, fetched_node_data_list):
+        if node_data:
+            # Lấy description tổng hợp từ KG node
+            kg_node_description = node_data.get("description", "UNKNOWN_KG_DESCRIPTION")
+            source_id_str = node_data.get("source_id", "")
+            all_chunk_ids = split_string_by_multi_markers(source_id_str, [GRAPH_FIELD_SEP])
+            # Filter out empty strings that might result from splitting
+            all_chunk_ids = [cid for cid in all_chunk_ids if cid]
+            kg_node_info_map[name] = {
+                "kg_description": kg_node_description, # Description từ KG
+                "all_kg_chunk_ids": all_chunk_ids
+            }
+        else:
+            # Handle case where node wasn't found in KG
+            kg_node_info_map[name] = {
+                "kg_description": None, # Không có description từ KG
+                "all_kg_chunk_ids": []
+            }
+            logger.debug(f"Node '{name}' not found in KG or had no data.")
+
+    # 4. Kết hợp thông tin từ VDB (đã lọc và có counts) và KG
+    final_output = []
+    for vdb_result in processed_vdb_results: # Lặp qua kết quả VDB đã xử lý
+        entity_name = vdb_result["entity_name"]
+        kg_info = kg_node_info_map.get(entity_name) # Lấy thông tin KG đã fetch
+
+        if kg_info: # Chỉ thêm kết quả nếu tìm thấy thông tin KG tương ứng
+            final_output.append({
+                "entity_name": entity_name,
+                "kg_description": kg_info["kg_description"], # Description tổng hợp từ KG node
+                "description": vdb_result["vdb_hit_description"], # Description cụ thể từ VDB hit
+                "retrieved_chunk_id": vdb_result["retrieved_chunk_id"],
+                "score": vdb_result["score"],
+                "all_kg_chunk_ids": kg_info["all_kg_chunk_ids"],
+                "entity_appearance_count": vdb_result["entity_appearance_count"],
+                "chunk_appearance_count": vdb_result["chunk_appearance_count"]
+            })
+        # else: Bỏ qua VDB result nếu không tìm thấy node tương ứng trong KG (đã log ở trên)
+
+    # (Phần lấy nội dung chunk tùy chọn giữ nguyên)
+
+    # Sắp xếp kết quả cuối cùng theo score (ví dụ: distance thấp hơn là tốt hơn)
+    final_output.sort(key=lambda x: x["score"])
+
+    logger.info(f"Returning {len(final_output)} node detail results for recall.")
+    return final_output
+
+# --- Cách sử dụng ví dụ ---
+# async def main():
+#     # Giả định bạn đã khởi tạo các instance cần thiết:
+#     # your_entities_vdb_instance: BaseVectorStorage
+#     # your_kg_instance: BaseGraphStorage
+#     # your_query_param_instance = QueryParam(top_k=5)
+#     # your_text_chunks_db_instance: BaseKVStorage (nếu muốn lấy content)
+
+#     results = await retrieve_node_details_for_recall(
+#         query="Giá của dịch vụ ABC là bao nhiêu?",
+#         entities_vdb=your_entities_vdb_instance,
+#         knowledge_graph_inst=your_kg_instance,
+#         # text_chunks_db=your_text_chunks_db_instance, # Bỏ comment nếu dùng
+#         query_param=your_query_param_instance
+#     )
+
+#     for res in results:
+#         print("-" * 20)
+#         print(f"Entity Name: {res['entity_name']}")
+#         print(f"KG Description: {res['kg_description']}")
+#         print(f"Retrieved Chunk ID: {res['retrieved_chunk_id']}")
+#         print(f"Score: {res['score']:.4f}")
+#         print(f"All KG Chunk IDs ({len(res['all_kg_chunk_ids'])}): {res['all_kg_chunk_ids'][:5]}...") # In 5 cái đầu
+#         # if 'all_kg_chunks_content' in res:
+#         #     print(f"All KG Chunks Content ({len(res['all_kg_chunks_content'])}):")
+#         #     for content in res['all_kg_chunks_content'][:2]: # In 2 nội dung đầu
+#         #         print(f"  - {content[:80]}...") # In 80 ký tự đầu
+
+# if __name__ == "__main__":
+#     # Nhớ import asyncio và các class cần thiết
+#     # from lightrag.base import QueryParam
+#     # from lightrag.prompt_old import GRAPH_FIELD_SEP
+#     # from lightrag.utils import split_string_by_multi_markers, logger
+#     # ... giả định các import khác và khởi tạo instance ...
+#     # asyncio.run(main())
+#     pass
+# Thêm hàm này vào file lightrag/operate_old.py
+# (Có thể đặt sau hàm retrieve_node_details_for_recall)
+
+from collections import Counter # Đảm bảo đã import ở đầu file hoặc trong hàm
+
+async def retrieve_edge_details_for_recall(
+    keywords: str, # Thay query bằng keywords cho ngữ nghĩa cạnh
+    relationships_vdb: BaseVectorStorage,
+    knowledge_graph_inst: BaseGraphStorage,
+    text_chunks_db: BaseKVStorage, # Tùy chọn lấy nội dung chunk
+    query_param: QueryParam,
+) -> list[dict]:
+    """
+    Truy vấn vector store của quan hệ (relationships_vdb) dựa trên keywords,
+    sau đó lấy mô tả cạnh từ KG, mô tả từ VDB hit, và *tất cả* chunk ID gốc của cạnh từ KG.
+    Đồng thời đếm số lần xuất hiện của cạnh và chunk trong quá trình lọc.
+
+    Args:
+        keywords: Chuỗi keywords để truy vấn VDB quan hệ.
+        relationships_vdb: Instance BaseVectorStorage cho quan hệ.
+        knowledge_graph_inst: Instance BaseGraphStorage.
+        text_chunks_db: (Tùy chọn) Instance BaseKVStorage nếu muốn lấy nội dung text chunk.
+        query_param: Instance QueryParam, dùng cho top_k và unique_entity_edge.
+
+    Returns:
+        Một list các dictionary, mỗi dict chứa:
+        - 'src_id' (str): ID nút nguồn của cạnh.
+        - 'tgt_id' (str): ID nút đích của cạnh.
+        - 'kg_description' (str | None): Mô tả của cạnh lấy từ knowledge graph.
+        - 'vdb_hit_description' (str): Description cụ thể từ VDB hit đã khớp query.
+        - 'retrieved_chunk_id' (str): ID của chunk cụ thể từ VDB hit liên quan đến cạnh.
+        - 'score' (float): Điểm tương đồng (distance) từ VDB hit.
+        - 'all_kg_chunk_ids' (list[str]): Danh sách tất cả chunk ID của cạnh này trong KG.
+        - 'edge_appearance_count' (int): Số lần cạnh (src, tgt) xuất hiện trong KQ VDB được xử lý cho đến khi đủ candidates.
+        - 'chunk_appearance_count' (int): Số lần retrieved_chunk_id xuất hiện trong KQ VDB được xử lý cho đến khi đủ candidates.
+        # - 'all_kg_chunks_content' (list[str] | None): (Tùy chọn) Nội dung của các chunk gốc.
+        - (Có thể thêm các trường khác từ KG edge data nếu cần, ví dụ: weight, keywords...)
+    """
+    logger.info(
+        f"Retrieving edge details for recall: keywords='{keywords}', top_k={query_param.top_k}, unique_mode={query_param.unique_entity_edge}"
+    )
+
+    # 1. Truy vấn Vector Store của Quan hệ (relationships_vdb)
+    try:
+        # Sử dụng top_k trực tiếp như hàm _get_edge_data_list_des cũ
+        # Có thể cân nhắc tăng lên nếu cần lọc nhiều hơn, ví dụ query_param.top_k * 5
+        vdb_results = await relationships_vdb.query(keywords, top_k=query_param.top_k)
+    except Exception as e:
+        logger.error(f"Error querying relationships_vdb: {e}")
+        return []
+
+    if not vdb_results:
+        logger.warning("No results found in relationships_vdb for keywords.")
+        return []
+
+    # --- Step 2: Filter VDB results and Count Appearances during filtering ---
+    edge_counts = Counter() # Đếm (src, tgt)
+    chunk_counts = Counter()
+    result_chosen = []
+    top_k_candidates = 100 # Giới hạn số lượng kết quả sau khi lọc
+
+    if getattr(query_param, 'unique_entity_edge', False): # True nghĩa là unique edge
+        logger.debug("Filtering for unique edges AND unique triggering chunks, counting appearances until limit.")
+        seen_edges = set() # Lưu các tuple (src_id, tgt_id) đã thấy
+        seen_triggering_chunks = set() # Thêm set cho chunk trigger
+        for result in vdb_results:
+            src_id = result.get("src_id")
+            tgt_id = result.get("tgt_id")
+            chunk_id = result.get("chunk_id")
+            distance = result.get("distance")
+
+            # Validation cơ bản
+            if src_id and tgt_id and chunk_id is not None and distance is not None:
+                try:
+                    float(distance) # Validate distance
+                except (ValueError, TypeError):
+                    logger.warning(f"Skipping edge result due to invalid distance: {result}")
+                    continue
+
+                edge_key = tuple(sorted((src_id, tgt_id))) # Chuẩn hóa key cạnh
+
+                # Tăng count *trước khi* kiểm tra unique
+                edge_counts[edge_key] += 1
+                chunk_counts[chunk_id] += 1
+
+                # Kiểm tra unique của CẢ edge VÀ chunk trigger
+                if edge_key not in seen_edges and chunk_id not in seen_triggering_chunks:
+                    seen_edges.add(edge_key)
+                    seen_triggering_chunks.add(chunk_id) # Đánh dấu chunk trigger đã dùng
+
+                    # Lấy số đếm hiện tại
+                    current_edge_count = edge_counts[edge_key]
+                    current_chunk_count = chunk_counts[chunk_id]
+
+                    result_chosen.append({
+                        **result,
+                        "edge_appearance_count": current_edge_count,
+                        "chunk_appearance_count": current_chunk_count
+                    })
+
+                    if len(result_chosen) >= top_k_candidates:
+                        logger.debug(f"Reached top {top_k_candidates} unique (edge, triggering_chunk) pairs. Stopping filtering.")
+                        break
+                 # else: Bỏ qua nếu edge đã thấy HOẶC chunk trigger đã thấy
+                elif edge_key not in seen_edges and chunk_id in seen_triggering_chunks:
+                     logger.debug(f"Skipping edge {edge_key} because triggering chunk '{chunk_id}' was already used.")
+                # Implicitly skips if edge_key in seen_edges
+
+            # else: skip results missing fields
+
+    else: # False nghĩa là unique chunk
+        logger.debug("Filtering for unique chunks (associated with edges), counting appearances until limit.")
+        seen_chunk_ids = set()
+        for result in vdb_results:
+            src_id = result.get("src_id")
+            tgt_id = result.get("tgt_id")
+            chunk_id = result.get("chunk_id")
+            distance = result.get("distance")
+
+            # Validation cơ bản
+            if src_id and tgt_id and chunk_id is not None and distance is not None:
+                try:
+                    float(distance) # Validate distance
+                except (ValueError, TypeError):
+                    logger.warning(f"Skipping edge result due to invalid distance: {result}")
+                    continue
+
+                edge_key = tuple(sorted((src_id, tgt_id))) # Chuẩn hóa key cạnh
+
+                # Tăng count *trước khi* kiểm tra unique
+                edge_counts[edge_key] += 1
+                chunk_counts[chunk_id] += 1
+
+                # Kiểm tra unique chunk
+                if chunk_id not in seen_chunk_ids:
+                    seen_chunk_ids.add(chunk_id)
+                     # Lấy số đếm hiện tại
+                    current_edge_count = edge_counts[edge_key] # Count cho cạnh liên quan đến chunk này
+                    current_chunk_count = chunk_counts[chunk_id]
+
+                    result_chosen.append({
+                        **result,
+                        "edge_appearance_count": current_edge_count,
+                        "chunk_appearance_count": current_chunk_count
+                    })
+
+                    if len(result_chosen) >= top_k_candidates:
+                        logger.debug(f"Reached top {top_k_candidates} unique chunks. Stopping filtering.")
+                        break
+            # else: skip results missing fields
+
+    if not result_chosen:
+        logger.warning("No results left after filtering relationship VDB hits based on mode.")
+        return []
+
+    logger.info(f"Filtered relationship VDB results down to {len(result_chosen)} candidates based on mode, with counts accumulated during filtering.")
+    # --- End of Step 2 ---
+
+
+    # 3. Chuẩn bị lấy thông tin từ Knowledge Graph (từ kết quả đã lọc)
+    edge_keys_to_fetch = set() # Set các tuple (src_id, tgt_id)
+    processed_vdb_results = []
+    for result in result_chosen: # Giờ luôn có counts
+        src_id = result.get("src_id")
+        tgt_id = result.get("tgt_id")
+        chunk_id = result.get("chunk_id")
+        score = result.get("distance")
+        vdb_hit_description = result.get("description", "UNKNOWN_VDB_DESCRIPTION") # Lấy desc từ VDB
+        edge_appearance_count = result.get("edge_appearance_count")
+        chunk_appearance_count = result.get("chunk_appearance_count")
+
+        # Check lại các trường chính và score
+        if src_id and tgt_id and chunk_id is not None and score is not None:
+            try:
+                float_score = float(score)
+                edge_key = tuple(sorted((src_id, tgt_id))) # Dùng key đã chuẩn hóa
+                edge_keys_to_fetch.add(edge_key) # Thêm key chuẩn hóa vào set để fetch
+                processed_vdb_results.append({
+                    "src_id": src_id, # Lưu ID gốc
+                    "tgt_id": tgt_id, # Lưu ID gốc
+                    "retrieved_chunk_id": chunk_id,
+                    "score": float_score,
+                    "vdb_hit_description": vdb_hit_description,
+                    "edge_appearance_count": edge_appearance_count,
+                    "chunk_appearance_count": chunk_appearance_count
+                })
+            except (ValueError, TypeError) as e:
+                 logger.warning(f"Could not convert score '{score}' for edge ('{src_id}', '{tgt_id}'), chunk '{chunk_id}'. Skipping. Error: {e}")
+        # else: Lỗi này ít xảy ra do đã check ở bước 2
+
+    if not edge_keys_to_fetch:
+        logger.warning("No valid edge keys found in filtered VDB results to fetch from KG.")
+        return []
+
+    # Lấy thông tin cạnh từ KG bất đồng bộ
+    # Lưu ý: get_edge thường nhận (src, tgt) theo thứ tự, nên fetch bằng key gốc từ processed_vdb_results thì tốt hơn
+    # Nhưng để tránh fetch trùng lặp, ta dùng edge_keys_to_fetch rồi map lại
+    logger.debug(f"Fetching {len(edge_keys_to_fetch)} unique edges from KG.")
+    edge_fetch_tasks = [knowledge_graph_inst.get_edge(src, tgt) for src, tgt in edge_keys_to_fetch]
+    try:
+        fetched_edge_data_list = await asyncio.gather(*edge_fetch_tasks)
+    except Exception as e:
+        logger.error(f"Error fetching edge data from knowledge graph: {e}")
+        # Xử lý lỗi, ví dụ trả về list rỗng hoặc gán None cho tất cả
+        return [] # Hoặc xử lý phức tạp hơn nếu cần
+
+    # Tạo map từ key cạnh (đã chuẩn hóa) sang thông tin KG
+    kg_edge_info_map = {}
+    for edge_key, edge_data in zip(edge_keys_to_fetch, fetched_edge_data_list):
+        if edge_data:
+            kg_description = edge_data.get("description", "UNKNOWN_KG_DESCRIPTION")
+            source_id_str = edge_data.get("source_id", "")
+            all_chunk_ids = split_string_by_multi_markers(source_id_str, [GRAPH_FIELD_SEP])
+            all_chunk_ids = [cid for cid in all_chunk_ids if cid] # Lọc chuỗi rỗng
+            # Lấy thêm các trường khác nếu muốn (weight, keywords...)
+            kg_weight = edge_data.get("weight")
+            kg_keywords = edge_data.get("keywords")
+            kg_edge_info_map[edge_key] = {
+                "kg_description": kg_description,
+                "all_kg_chunk_ids": all_chunk_ids,
+                "kg_weight": kg_weight,
+                "kg_keywords": kg_keywords
+            }
+        else:
+            # Cạnh không tìm thấy trong KG
+             kg_edge_info_map[edge_key] = {
+                "kg_description": None,
+                "all_kg_chunk_ids": [],
+                "kg_weight": None,
+                "kg_keywords": None
+            }
+            logger.debug(f"Edge with key {edge_key} not found in KG or had no data.")
+
+
+    # 4. Kết hợp thông tin từ VDB (đã lọc) và KG
+    final_output = []
+    for vdb_result in processed_vdb_results:
+        src_id = vdb_result["src_id"]
+        tgt_id = vdb_result["tgt_id"]
+        edge_key = tuple(sorted((src_id, tgt_id))) # Key chuẩn hóa để tra cứu
+        kg_info = kg_edge_info_map.get(edge_key)
+
+        if kg_info and kg_info["kg_description"] is not None: # Chỉ thêm nếu cạnh tồn tại trong KG
+            final_output.append({
+                "src_id": src_id,
+                "tgt_id": tgt_id,
+                "kg_description": kg_info["kg_description"], # Desc từ KG
+                "description": vdb_result["vdb_hit_description"], # Desc từ VDB hit
+                "retrieved_chunk_id": vdb_result["retrieved_chunk_id"],
+                "score": vdb_result["score"],
+                "all_kg_chunk_ids": kg_info["all_kg_chunk_ids"],
+                "edge_appearance_count": vdb_result["edge_appearance_count"],
+                "chunk_appearance_count": vdb_result["chunk_appearance_count"],
+
+            })
+        else:
+             logger.debug(f"Skipping VDB result for edge ('{src_id}', '{tgt_id}') as it was not found or lacked description in KG.")
+
+
+    # 5. (Tùy chọn) Lấy nội dung chunk gốc từ text_chunks_db
+    if text_chunks_db and final_output: # Chỉ chạy nếu có text_chunks_db và có kết quả
+        all_unique_kg_chunk_ids = set()
+        for item in final_output:
+            all_unique_kg_chunk_ids.update(item['all_kg_chunk_ids'])
+
+        if all_unique_kg_chunk_ids:
+            logger.debug(f"Fetching content for {len(all_unique_kg_chunk_ids)} unique KG chunk IDs.")
+            try:
+                chunk_contents_map = {}
+                # Chuyển set thành list để query
+                chunk_ids_list = list(all_unique_kg_chunk_ids)
+                chunk_data_list = await text_chunks_db.get_by_ids(chunk_ids_list)
+                # Tạo map từ ID sang content, lọc None hoặc thiếu 'content'
+                chunk_contents_map = {
+                    cid: chunk_data['content']
+                    for cid, chunk_data in zip(chunk_ids_list, chunk_data_list)
+                    if chunk_data and 'content' in chunk_data
+                }
+
+                # Gắn content vào final_output
+                for item in final_output:
+                    item['all_kg_chunks_content'] = [
+                        chunk_contents_map.get(cid)
+                        for cid in item['all_kg_chunk_ids']
+                        if chunk_contents_map.get(cid) is not None
+                    ]
+                    # Thêm một key rỗng nếu không fetch được gì
+                    if 'all_kg_chunks_content' not in item:
+                        item['all_kg_chunks_content'] = []
+
+            except Exception as e:
+                logger.error(f"Error fetching chunk content from text_chunks_db: {e}", exc_info=True)
+                # Gán giá trị mặc định hoặc None nếu lỗi
+                for item in final_output:
+                    item['all_kg_chunks_content'] = None # Hoặc [] tùy logic mong muốn
+        else:
+             logger.debug("No KG chunk IDs found to fetch content for.")
+             # Đảm bảo key tồn tại nếu không có gì để fetch
+             for item in final_output:
+                 item['all_kg_chunks_content'] = []
+
+
+    # Sắp xếp kết quả cuối cùng theo score (distance thấp hơn là tốt hơn)
+    final_output.sort(key=lambda x: x["score"])
+
+    logger.info(f"Returning {len(final_output)} edge detail results for recall, including appearance counts.")
+    return final_output
