@@ -163,7 +163,7 @@
             
 import asyncio
 import os
-from typing import Any, final, Dict, List
+from typing import Any, final, Dict, List, Tuple
 from dataclasses import dataclass
 import numpy as np
 import json
@@ -368,6 +368,95 @@ def save_pairs_to_json(pairs: List[Dict[str, Any]], output_file: str) -> None:
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump( entity_mapping, f, ensure_ascii=False, indent=2)
 
+def load_vdb_data(file_path: str) -> Dict[str, Any]:
+    """Load VDB data from file, handling potential missing file."""
+    if not os.path.exists(file_path):
+        logger.error(f"VDB file not found: {file_path}")
+        raise FileNotFoundError(f"File {file_path} not found")
+
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            data = json.load(f)
+        # Basic validation
+        if "matrix" not in data or "data" not in data or "embedding_dim" not in data:
+            raise ValueError(f"VDB file {file_path} is missing required fields ('matrix', 'data', 'embedding_dim')")
+        # Ensure data is a list
+        if not isinstance(data.get("data"), list):
+             raise ValueError(f"Field 'data' in VDB file {file_path} must be a list.")
+        return data
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from {file_path}: {e}")
+        raise ValueError(f"Invalid JSON format in {file_path}") from e
+    except Exception as e:
+        logger.error(f"Error loading VDB file {file_path}: {e}")
+        raise
+
+def find_vdb_entry_pairs(vdb1: Dict[str, Any], vdb2: Dict[str, Any], threshold: float = 0.8) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
+    """
+    Find similar entry pairs between two VDBs based on cosine similarity.
+
+    Args:
+        vdb1: First loaded VDB data dictionary.
+        vdb2: Second loaded VDB data dictionary.
+        threshold: Similarity threshold.
+
+    Returns:
+        List of tuples: [(vdb1_entry, vdb2_entry, similarity_score)]
+        where vdb1_entry and vdb2_entry are the full dictionary entries from vdb1['data'] and vdb2['data'].
+    """
+    try:
+        # Extract matrices and check dimensions
+        if vdb1["embedding_dim"] != vdb2["embedding_dim"]:
+            raise ValueError("Embedding dimensions of the two VDBs do not match.")
+        embedding_dim = vdb1["embedding_dim"]
+
+        matrix1 = buffer_string_to_array(vdb1["matrix"]).reshape(-1, embedding_dim)
+        matrix2 = buffer_string_to_array(vdb2["matrix"]).reshape(-1, embedding_dim)
+
+        # Verify matrix rows match data length
+        if matrix1.shape[0] != len(vdb1["data"]):
+            raise ValueError(f"Matrix 1 row count ({matrix1.shape[0]}) does not match data length ({len(vdb1['data'])})")
+        if matrix2.shape[0] != len(vdb2["data"]):
+            raise ValueError(f"Matrix 2 row count ({matrix2.shape[0]}) does not match data length ({len(vdb2['data'])})")
+
+        # Normalize matrices
+        matrix1_norm = normalize(matrix1)
+        matrix2_norm = normalize(matrix2)
+
+        logger.info(f"Computing similarity between matrices of shape {matrix1_norm.shape} and {matrix2_norm.shape}")
+        start_time = time.time()
+        similarity = np.dot(matrix1_norm, matrix2_norm.T)
+        logger.info(f"Similarity computation took {time.time() - start_time:.2f} seconds.")
+
+        # Find pairs above threshold using np.where for efficiency
+        matches = np.where(similarity >= threshold)
+        logger.info(f"Found {len(matches[0])} potential pairs above threshold {threshold}.")
+
+        pairs = []
+        start_time = time.time()
+        # Use zip for efficient iteration over match indices
+        for i, j in zip(matches[0], matches[1]):
+            try:
+                # Access the full data entries using the indices
+                entry1 = vdb1["data"][i]
+                entry2 = vdb2["data"][j]
+                score = float(similarity[i, j])
+                pairs.append((entry1, entry2, score))
+            except IndexError:
+                 logger.warning(f"Index out of bounds when accessing VDB data at indices ({i}, {j}). Skipping pair.")
+            except Exception as e:
+                 logger.error(f"Error processing pair at indices ({i}, {j}): {e}")
+
+        logger.info(f"Pair processing took {time.time() - start_time:.2f} seconds. Returning {len(pairs)} pairs.")
+        return pairs
+
+    except KeyError as e:
+        logger.error(f"Missing key in VDB data structure: {e}")
+        raise ValueError("Invalid VDB data structure") from e
+    except Exception as e:
+        logger.error(f"An unexpected error occurred in find_vdb_entry_pairs: {e}", exc_info=True)
+        raise
+
 @final
 @dataclass
 class NanoVectorDBStorage(BaseVectorStorage):
@@ -538,27 +627,40 @@ class NanoVectorDBStorage(BaseVectorStorage):
             logger.error(f"Error finding and storing similar pairs: {e}")
             raise
 
-    async def find_and_save_entity_pairs(self, vdb1_path: str, vdb2_path: str, output_path: str, threshold: float = 0.8) -> None:
-        """Find similar entity pairs between two VDBs and save to JSON file.
-        
+    async def find_similar_vdb_pairs(self, vdb1_path: str, vdb2_path: str, threshold: float = 0.8) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
+        """
+        Loads two VDB files and finds pairs of entries with similarity above a threshold.
+
         Args:
-            vdb1_path: Path to first VDB file
-            vdb2_path: Path to second VDB file
-            output_path: Path to save pairs JSON file
-            threshold: Similarity threshold (default: 0.8)
+            vdb1_path: Path to the first VDB file (.json).
+            vdb2_path: Path to the second VDB file (.json).
+            threshold: Similarity threshold.
+
+        Returns:
+            List of tuples: [(vdb1_entry, vdb2_entry, similarity_score)]
         """
         try:
-            # Load VDBs
-            vdb1 = load_entity_vdb(vdb1_path)
-            vdb2 = load_entity_vdb(vdb2_path)
-            
-            # Find similar pairs
-            pairs = find_entity_pairs(vdb1, vdb2, threshold)
-            
-            # Save pairs to JSON file
-            save_pairs_to_json(pairs, output_path)
-            logger.info(f"Found and saved {len(pairs)} similar entity pairs to {output_path}")
-            
+            logger.info(f"Loading VDB file 1: {vdb1_path}")
+            vdb1 = load_vdb_data(vdb1_path)
+            logger.info(f"Loading VDB file 2: {vdb2_path}")
+            vdb2 = load_vdb_data(vdb2_path)
+
+            logger.info("Finding similar VDB entry pairs...")
+            # This is a computationally intensive task, run it in a separate thread
+            # if it blocks the event loop for too long, although numpy operations
+            # often release the GIL. For simplicity, calling directly here.
+            # Consider asyncio.to_thread if performance becomes an issue.
+            pairs = find_vdb_entry_pairs(vdb1, vdb2, threshold)
+
+            logger.info(f"Found {len(pairs)} similar pairs between VDBs above threshold {threshold}.")
+            return pairs
+
+        except FileNotFoundError as e:
+            logger.error(f"VDB file not found: {e}")
+            return [] # Return empty list if a file is missing
+        except ValueError as e:
+             logger.error(f"Error processing VDB data: {e}")
+             return [] # Return empty list on data errors
         except Exception as e:
-            logger.error(f"Error finding and saving entity pairs: {e}")
-            raise
+            logger.error(f"An unexpected error occurred in find_similar_vdb_pairs: {e}", exc_info=True)
+            return [] # Return empty list on unexpected errors
