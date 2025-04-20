@@ -10,11 +10,256 @@ from dataclasses import asdict
 from lightrag.utils import logger
 from lightrag.kg.nano_vector_db_impl import NanoVectorDBStorage
 from lightrag.operate_old import kg_direct_recall
-from lightrag.types import QueryParam
-from lightrag.util_funcs import always_get_an_event_loop
+from lightrag.base import QueryParam
+from lightrag.lightrag_old import always_get_an_event_loop
 
 # Import entity mapping
 from entity_mapping import find_mapped_entity_description, find_mapped_edge_description
+
+
+
+import os
+import sys
+import time
+import json
+import random
+import asyncio
+from typing import List
+
+
+from lightrag import LightRAG, QueryParam
+from lightrag.llm.hf import hf_embed
+from lightrag.utils import EmbeddingFunc
+from transformers import AutoModel, AutoTokenizer
+from lightrag.llm.openai import openai_complete_if_cache
+from lightrag.utils import detect_language
+
+
+with open("/home/hungpv/projects/list_key_open_router/openrouter_full.json", 'r', encoding='utf-8') as f:
+    OPENROUTER_API_KEYS = json.load(f)
+OPENROUTER_API_KEYS = OPENROUTER_API_KEYS[700:]
+print(f"Tổng số API keys: {len(OPENROUTER_API_KEYS)}")
+
+# Thêm lock để xử lý đồng thời
+class APIManager:
+    def __init__(self, api_keys: List[str]):
+        self.api_keys = api_keys
+        self.current_key_index = 0
+        self.failed_keys = set()
+        self.permanently_banned_keys = set()  # Thêm set để lưu các key bị cấm vĩnh viễn do lỗi 429
+        self.last_switch_time = {}
+        self.lock = asyncio.Lock()  # Thêm lock để xử lý đồng thời
+        
+    async def get_current_api_key(self):
+        async with self.lock:
+            return self.api_keys[self.current_key_index]
+    
+    async def switch_to_next_key(self, mark_current_as_failed=False):
+        async with self.lock:
+            # Chỉ đánh dấu key là failed nếu có yêu cầu
+            if mark_current_as_failed:
+                self.failed_keys.add(self.current_key_index)
+                self.last_switch_time[self.current_key_index] = time.time()
+            
+            # Lưu index hiện tại để không chọn lại key đó
+            previous_index = self.current_key_index
+            
+            # Cập nhật danh sách available keys
+            available_keys = []
+            for idx in range(len(self.api_keys)):
+                # Không chọn lại key hiện tại, các key đã thất bại tạm thời, và các key bị cấm vĩnh viễn
+                if (idx != previous_index and 
+                    idx not in self.failed_keys and 
+                    idx not in self.permanently_banned_keys):
+                    available_keys.append(idx)
+                # Phục hồi key đã qua thời gian chờ (chỉ cho key thất bại tạm thời, không cho key bị cấm vĩnh viễn)
+                elif idx in self.last_switch_time and idx != previous_index and idx not in self.permanently_banned_keys:
+                    if time.time() - self.last_switch_time[idx] > 600:  # 10 phút
+                        if idx in self.failed_keys:
+                            self.failed_keys.remove(idx)
+                        available_keys.append(idx)
+            
+            # Nếu không còn key nào khả dụng, dừng chương trình
+            if not available_keys:
+                print("CẢNH BÁO: Không còn API key nào khả dụng!")
+                print(f"- Tổng số key: {len(self.api_keys)}")
+                print(f"- Key thất bại tạm thời: {len(self.failed_keys)}")
+                print(f"- Key bị cấm vĩnh viễn (429): {len(self.permanently_banned_keys)}")
+                raise RuntimeError("Không còn API key khả dụng. Chương trình buộc phải dừng lại.")
+            
+            # Chọn một key ngẫu nhiên từ danh sách khả dụng
+            self.current_key_index = random.choice(available_keys)
+            print(f"Đã chuyển sang API key: {self.api_keys[self.current_key_index][:5]}...")
+            return self.api_keys[self.current_key_index]
+    
+    async def mark_key_failed(self, key_index):
+        async with self.lock:
+            self.failed_keys.add(key_index)
+            self.last_switch_time[key_index] = time.time()
+            
+    async def mark_key_rate_limited(self, key_index):
+        """Đánh dấu key bị cấm vĩnh viễn do lỗi rate limit (429)"""
+        async with self.lock:
+            self.permanently_banned_keys.add(key_index)
+            # Xóa khỏi danh sách key thất bại tạm thời nếu có
+            if key_index in self.failed_keys:
+                self.failed_keys.remove(key_index)
+            print(f"API key {self.api_keys[key_index][:5]} đã bị đánh dấu là cấm vĩnh viễn do lỗi 429")
+
+# Khởi tạo API Manager
+api_manager = APIManager(OPENROUTER_API_KEYS)
+
+WORKING_DIR = "./new_zalo_graph_single_en_without_embedding"
+
+if not os.path.exists(WORKING_DIR):
+    os.mkdir(WORKING_DIR)
+
+# Sử dụng biến global cho API key hiện tại
+current_api_key = OPENROUTER_API_KEYS[0]  # Khởi tạo với key đầu tiên
+
+# Semaphore để giới hạn số lượng request đồng thời
+api_semaphore = asyncio.Semaphore(20)  # Giới hạn 5 requests đồng thời
+
+# Cập nhật hàm llm_model_func để xử lý lỗi 429
+async def llm_model_func(
+    prompt, system_prompt=None, history_messages=[], keyword_extraction=False, **kwargs
+) -> str:
+    global current_api_key
+    max_retries = min(len(OPENROUTER_API_KEYS), 30)  # Giới hạn số lần retry
+    retry_count = 0
+    
+    # Định nghĩa các chuỗi để nhận diện lỗi rate limit
+    rate_limit_indicators = [
+        "429",
+        "too many requests", 
+        "rate limit", 
+        "quota exceeded", 
+        "resource_exhausted",
+        "provider returned error"  # OpenRouter thường trả về lỗi này khi có lỗi 429
+    ]
+    
+    # Sử dụng semaphore để giới hạn số lượng request đồng thời
+    async with api_semaphore:
+        # Luôn chuyển sang key mới trước khi gọi API
+        current_api_key = await api_manager.switch_to_next_key(mark_current_as_failed=False)
+        os.environ["LLM_BINDING_API_KEY"] = current_api_key
+        
+        while retry_count < max_retries:
+            try:
+                response = await openai_complete_if_cache(
+                    "google/gemini-2.0-flash-exp:free",
+                    prompt,
+                    system_prompt=system_prompt,
+                    history_messages=history_messages,
+                    api_key=current_api_key, 
+                    base_url=os.getenv("LLM_BINDING_HOST", "https://openrouter.ai/api/v1"),
+                    **kwargs
+                )
+                
+                # Kiểm tra xem response có chứa error không (đặc biệt là lỗi 429)
+                if hasattr(response, 'error') and response.error is not None:
+                    error_info = response.error
+                    error_str = str(error_info)
+                    print(f"Lỗi trong response: {error_str}")
+                    
+                    # Xác định xem có phải lỗi 429 không
+                    is_rate_limit = False
+                    if isinstance(error_info, dict) and 'code' in error_info and error_info['code'] == 429:
+                        is_rate_limit = True
+                    else:
+                        error_lower = error_str.lower()
+                        is_rate_limit = any(indicator in error_lower for indicator in rate_limit_indicators)
+                    
+                    if is_rate_limit:
+                        # Nếu là lỗi 429, đánh dấu key này bị cấm vĩnh viễn
+                        current_key_index = OPENROUTER_API_KEYS.index(current_api_key)
+                        await api_manager.mark_key_rate_limited(current_key_index)
+                        
+                        # Thử với key khác
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            await asyncio.sleep(0.5 * retry_count)
+                            print(f"Thử lại lần {retry_count}/{max_retries}...")
+                            current_api_key = await api_manager.switch_to_next_key(mark_current_as_failed=False)
+                            os.environ["LLM_BINDING_API_KEY"] = current_api_key
+                            continue
+                        else:
+                            raise RuntimeError(f"Không thể hoàn thành yêu cầu sau {max_retries} lần thử")
+                
+                # Không đánh dấu key là failed khi thành công
+                return response
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                print(f"Lỗi với API key {current_api_key[:5]}: {str(e)}")
+                
+                # Kiểm tra xem có phải lỗi rate limit không
+                is_rate_limit = any(indicator in error_str for indicator in rate_limit_indicators)
+                
+                # Lấy index của key hiện tại
+                current_key_index = OPENROUTER_API_KEYS.index(current_api_key)
+                
+                if is_rate_limit:
+                    # Nếu là lỗi rate limit, đánh dấu key này bị cấm vĩnh viễn
+                    print(f"Phát hiện lỗi rate limit! API key {current_api_key[:5]} bị đánh dấu cấm vĩnh viễn.")
+                    await api_manager.mark_key_rate_limited(current_key_index)
+                else:
+                    # Nếu không phải lỗi rate limit, đánh dấu key này thất bại tạm thời
+                    await api_manager.mark_key_failed(current_key_index)
+                
+                retry_count += 1
+                if retry_count < max_retries:
+                    # Thêm một khoảng chờ nhỏ trước khi thử lại
+                    await asyncio.sleep(0.5 * retry_count)  # Tăng dần thời gian chờ
+                    print(f"Thử lại lần {retry_count}/{max_retries}...")
+                    try:
+                        current_api_key = await api_manager.switch_to_next_key(mark_current_as_failed=False)
+                        os.environ["LLM_BINDING_API_KEY"] = current_api_key
+                    except RuntimeError as e:
+                        # Nếu không còn key nào khả dụng, dừng chương trình
+                        print(str(e))
+                        sys.exit(1)
+                else:
+                    print("Đã vượt quá số lần thử lại.")
+                    raise RuntimeError(f"Không thể hoàn thành yêu cầu sau {max_retries} lần thử: {str(e)}")
+    
+    raise RuntimeError("Tất cả API keys đều đã thất bại")
+
+print("Loading model...")
+print("google/gemini-2.0-flash-exp:free")
+
+async def embedding_func(texts, model):
+    return model.encode(texts)["dense_vecs"]
+
+# Chuyển lại sang hàm đồng bộ
+def init_rag(working_dir, embedding_path, embedding_func_name, devices):
+    print("Initializing LightRAG...")
+    print(f"Using LLM model: google/gemini-2.0-pro-exp-02-05:free")
+    
+    # Khởi tạo đối tượng LightRAG
+    from FlagEmbedding import BGEM3FlagModel
+
+    # model = BGEM3FlagModel('/home/hungpv/projects/train_embedding/nanographrag/flag_embedding_train/test_encoder_only_m3_bge-m3_sd/checkpoint-90804',  
+    #                    use_fp16=False, devices = ["cuda:0"],pooling_method = "mean")
+    model = BGEM3FlagModel(embedding_path,  
+                       use_fp16=False, devices = devices,pooling_method = "mean")
+    
+    embedding_func_name = embedding_func_name
+    # embedding_func_name = "bge-m3-only-entity-name-only-edge-description"
+# /home/hungpv/projects/TN/LIGHTRAG/zalo_wiki_graph_single_vi_v2/vdb_chunks_fine-tune-embedding.json
+
+    return LightRAG(
+        working_dir=working_dir,
+        llm_model_func=llm_model_func,
+        embedding_func=EmbeddingFunc(
+            embedding_dim=1024,
+            max_token_size=512,
+            func=lambda texts: embedding_func(texts, model),
+        ),
+        embedding_func_name = embedding_func_name
+    )
+
+
 
 class DualGraphQuery:
     """
@@ -341,13 +586,13 @@ class DualGraphQuery:
             )
             all_results.append(result)
         
-        # Save all results to a single batch file if requested
-        if batch_output_file:
-            batch_filepath = os.path.join(self.output_dir, batch_output_file)
-            with open(batch_filepath, "w", encoding="utf-8") as f:
-                for result in all_results:
-                    f.write(json.dumps(result, ensure_ascii=False) + "\n")
-            logger.info(f"Batch results saved to {batch_filepath}")
+            # Save all results to a single batch file if requested
+            if batch_output_file:
+                batch_filepath = os.path.join(self.output_dir, batch_output_file)
+                with open(batch_filepath, "w", encoding="utf-8") as f:
+                    for result in all_results:
+                        f.write(json.dumps(result, ensure_ascii=False, indent=4) + "\n")
+                logger.info(f"Batch results saved to {batch_filepath}")
         
         logger.info(f"Completed processing {len(queries)} queries")
         return all_results
@@ -368,8 +613,11 @@ if __name__ == "__main__":
     parser.add_argument("--graph1_name", default="graph1", help="Name for first graph")
     parser.add_argument("--graph2_name", default="graph2", help="Name for second graph")
     parser.add_argument("--batch_output", help="Filename for combined batch results (for batch mode)")
-    parser.add_argument("--embedding_model", default="sentence-transformers/all-MiniLM-L6-v2", 
+    parser.add_argument("--embedding_func", default="sentence-transformers/all-MiniLM-L6-v2", 
                         help="Embedding model to use for both graphs")
+    parser.add_argument("--embedding_path_graph1", default="graph1", help="Name for first graph")
+    parser.add_argument("--embedding_path_graph2", default="graph2", help="Name for second graph")
+    parser.add_argument('--devices', nargs='+', help='List of CUDA devices')
     
     args = parser.parse_args()
     
@@ -377,20 +625,19 @@ if __name__ == "__main__":
     if not args.query and not args.queries_file:
         parser.error("Either --query or --queries_file must be provided")
     
-    # Import LightRAG and other required components
-    from lightrag.lightrag import LightRAG
-    from lightrag.embedding.sentence_transformers_embedding import SentenceTransformersEmbedding
-    
-    # Initialize embedding function for both graphs 
-    embedding_func = SentenceTransformersEmbedding(model_name=args.embedding_model)
-    
-    # Load both graphs - initialize directly instead of using from_saved
-    graph1 = LightRAG(
+
+    graph1 = init_rag(
         working_dir=args.graph1_path,
+        embedding_path=args.embedding_path_graph1,
+        embedding_func_name=args.embedding_func, 
+        devices=args.devices,
         embedding_func=embedding_func
     )
-    graph2 = LightRAG(
+    graph2 = init_rag(
         working_dir=args.graph2_path,
+        embedding_path=args.embedding_path_graph2,
+        embedding_func_name=args.embedding_func, 
+        devices=args.devices,
         embedding_func=embedding_func
     )
     
@@ -413,13 +660,6 @@ if __name__ == "__main__":
             save_results=True
         )
         
-        # Print summary
-        print(f"Query: {args.query}")
-        print(f"Mode: {args.mode}")
-        print(f"Results: {results['metrics']['total_candidates']} candidates found")
-        print(f"Nodes: {results['metrics']['node_count']}")
-        print(f"Edges: {results['metrics']['edge_count']}")
-        print(f"Chunks: {results['metrics']['chunk_count']}")
         
     else:
         # Batch mode
@@ -448,3 +688,8 @@ if __name__ == "__main__":
         print(f"Total chunks: {total_chunks}")
         
     print(f"Results saved to {args.output_dir}") 
+    
+    
+    
+
+#############################
