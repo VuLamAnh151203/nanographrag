@@ -6,7 +6,7 @@ import configparser
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Any, AsyncIterator, Callable, Iterator, cast
+from typing import Any, AsyncIterator, Callable, Iterator, cast, List, Dict, Tuple
 from sklearn.metrics.pairwise import cosine_similarity  
 import numpy as np        
 import re
@@ -33,7 +33,9 @@ from .operate_old import (
     kg_retrieval,
     _merge_nodes_then_upsert,
     _merge_edges_then_upsert,
-    naive_retrieval
+    naive_retrieval,
+    kg_direct_recall, # New function returning (candidates, hl_keywords, ll_keywords)
+
 )
 
 
@@ -4695,3 +4697,61 @@ class LightRAG:
 
 
         print("Add new embedding sucessfully")
+
+    def new_retrieval(
+        self,
+        query: str,
+        param: QueryParam = QueryParam(),
+        # system_prompt: str | None = None, # Not used directly by recall funcs
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+        """Sync retrieval using direct recall functions, returning candidates and keywords.
+
+        Args:
+            query (str): The query string.
+            param (QueryParam): Configuration parameters for retrieval.
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[str], List[str]]: A tuple containing:
+                - A list of candidate node/edge dictionaries.
+                - The extracted high-level keywords.
+                - The extracted low-level keywords.
+        """
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.anew_retrieval(query, param))
+
+    async def anew_retrieval(
+        self,
+        query: str,
+        param: QueryParam = QueryParam(),
+        # system_prompt: str | None = None, # Not used directly by recall funcs
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+        """Async retrieval using direct recall functions, returning candidates and keywords.
+
+        Args:
+            query (str): The query string.
+            param (QueryParam): Configuration parameters for retrieval.
+
+        Returns:
+            Tuple[List[Dict[str, Any]], List[str], List[str]]: A tuple containing:
+                - A list of candidate node/edge dictionaries.
+                - The extracted high-level keywords.
+                - The extracted low-level keywords.
+        """
+        logger.info(f"Executing anew_retrieval with mode: {param.mode}")
+
+        # Call the function from operate_old which now returns a tuple
+        candidates, hl_keywords, ll_keywords = await kg_direct_recall(
+            query=query,
+            knowledge_graph_inst=self.chunk_entity_relation_graph,
+            entities_vdb=self.entities_vdb,
+            relationships_vdb=self.relationships_vdb,
+            text_chunks_db=self.text_chunks,
+            query_param=param,
+            global_config=asdict(self),
+            hashing_kv=self.llm_response_cache # Pass hashing_kv if needed
+        )
+
+        logger.info(f"anew_retrieval completed. Returning {len(candidates)} candidates, {len(hl_keywords)} HL keywords, {len(ll_keywords)} LL keywords.")
+
+        # Return the tuple directly
+        return candidates, hl_keywords, ll_keywords

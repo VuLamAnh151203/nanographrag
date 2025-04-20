@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, List, Dict, Tuple
 from collections import Counter, defaultdict
 from .utils import (
     logger,
@@ -2324,6 +2324,53 @@ async def _find_related_text_unit_from_relationships(
     return all_text_units,text_unit_per_edges
 
 
+async def get_chunk_ids_from_entity_or_edge(
+    item_id: str | tuple[str, str],
+    knowledge_graph_inst: BaseGraphStorage,
+    text_chunks_db: BaseKVStorage,
+):
+    """
+    Retrieve all chunk IDs associated with an entity node or an edge.
+    
+    Args:
+        item_id: Either a string (entity node ID) or a tuple of two strings (source and target IDs for an edge)
+        knowledge_graph_inst: Instance of BaseGraphStorage for accessing the knowledge graph
+        text_chunks_db: Instance of BaseKVStorage for accessing text chunks
+        
+    Returns:
+        list[str]: List of chunk IDs associated with the entity or edge
+    """
+    if isinstance(item_id, tuple) and len(item_id) == 2:
+        # Handle edge case - get chunks from the edge
+        src_id, tgt_id = item_id
+        edge_data = await knowledge_graph_inst.get_edge(src_id, tgt_id)
+        
+        if edge_data is None or "source_id" not in edge_data:
+            logger.warning(f"Edge <{src_id},{tgt_id}> not found or doesn't have source_id")
+            return []
+            
+        chunk_ids = split_string_by_multi_markers(edge_data["source_id"], [GRAPH_FIELD_SEP])
+        return chunk_ids
+        
+    else:
+        # Handle entity node case
+        node_data = await knowledge_graph_inst.get_node(item_id)
+        
+        if node_data is None or "source_id" not in node_data:
+            logger.warning(f"Entity node {item_id} not found or doesn't have source_id")
+            return []
+            
+        chunk_ids = split_string_by_multi_markers(node_data["source_id"], [GRAPH_FIELD_SEP])
+        return chunk_ids
+
+
+# # Lấy chunk ID từ một entity node
+# chunk_ids = await get_chunk_ids_from_entity_or_edge("entity_name", knowledge_graph_inst, text_chunks_db)
+
+# # Lấy chunk ID từ một edge
+# chunk_ids = await get_chunk_ids_from_entity_or_edge(("source_id", "target_id"), knowledge_graph_inst, text_chunks_db)
+
+
 def combine_contexts(entities, relationships, sources):
     # Function to extract entities, relationships, and sources from context strings
     hl_entities, ll_entities = entities[0], entities[1]
@@ -3209,3 +3256,144 @@ async def retrieve_edge_details_for_recall(
 
     logger.info(f"Returning {len(final_output)} edge detail results for recall, including appearance counts.")
     return final_output
+
+# <<< END EDGE RECALL FUNCTION >>>
+
+
+# <<< START NEW DIRECT RECALL FUNCTION >>>
+async def kg_direct_recall(
+    query: str,
+    knowledge_graph_inst: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
+    text_chunks_db: BaseKVStorage, # Needed for edge recall optional content fetch
+    query_param: QueryParam,
+    global_config: dict[str, str],
+    hashing_kv: BaseKVStorage | None = None, # Added for keyword caching
+) -> Tuple[List[Dict[str, Any]], List[str], List[str]]: # Return candidates and keywords
+    """Retrieves node and/or edge candidates directly using detailed recall functions.
+
+    This function first extracts keywords (HL/LL) from the query, then calls
+    retrieve_node_details_for_recall and/or retrieve_edge_details_for_recall
+    based on the query_param.mode using the extracted keywords. It combines the results.
+
+    Args:
+        query (str): The input query string.
+        knowledge_graph_inst (BaseGraphStorage): Instance of the graph storage.
+        entities_vdb (BaseVectorStorage): Instance of the entity vector database.
+        relationships_vdb (BaseVectorStorage): Instance of the relationship vector database.
+        text_chunks_db (BaseKVStorage): Instance of the text chunk key-value store.
+        query_param (QueryParam): Parameters controlling the retrieval process.
+        global_config (dict[str, str]): Global configuration dictionary.
+        hashing_kv (BaseKVStorage | None): Optional KV storage for keyword caching.
+
+    Returns:
+        Tuple[List[Dict[str, Any]], List[str], List[str]]: A tuple containing:
+            - A list of candidate dictionaries (nodes and/or edges), each marked with 'retrieval_type'.
+            - The extracted high-level keywords.
+            - The extracted low-level keywords.
+    """
+    logger.info(f"Executing kg_direct_recall with mode: {query_param.mode}")
+
+    # 1. Extract Keywords
+    try:
+        hl_keywords_list, ll_keywords_list = await extract_keywords_only(
+            text=query,
+            param=query_param,
+            global_config=global_config,
+            hashing_kv=hashing_kv
+        )
+        hl_keywords_str = ", ".join(hl_keywords_list)
+        ll_keywords_str = ", ".join(ll_keywords_list)
+        logger.debug(f"Extracted keywords for kg_direct_recall: HL='{hl_keywords_str}', LL='{ll_keywords_str}'")
+    except Exception as e:
+        logger.error(f"Error extracting keywords in kg_direct_recall: {e}", exc_info=True)
+        return [], [], [] # Return empty lists for all parts of the tuple
+
+    # Check if keywords are empty
+    if not hl_keywords_list and not ll_keywords_list:
+        logger.warning("Both HL and LL keywords are empty after extraction. Returning empty list.")
+        return [], [], [] # Return empty lists for all parts of the tuple
+
+    # Determine query strings for recall functions based on extracted keywords
+    node_query_str = ll_keywords_str or hl_keywords_str # Fallback for node query
+    edge_keywords_str = hl_keywords_str # Edge recall specifically uses HL keywords
+
+    # 2. Schedule Recall Tasks based on mode and available keywords
+    recall_tasks = []
+    node_task_idx = -1
+    edge_task_idx = -1
+
+    # Schedule Node Recall Task
+    if query_param.mode in ["local", "hybrid"]:
+        if node_query_str:
+            recall_tasks.append(retrieve_node_details_for_recall(
+                query=node_query_str,
+                entities_vdb=entities_vdb,
+                knowledge_graph_inst=knowledge_graph_inst,
+                query_param=query_param,
+            ))
+            node_task_idx = len(recall_tasks) - 1
+            logger.debug(f"Added node recall task for kg_direct_recall with query: '{node_query_str}'")
+        else:
+            logger.warning("Skipping node recall task: Effective query string is empty.")
+
+    # Schedule Edge Recall Task
+    if query_param.mode in ["global", "hybrid"]:
+        if edge_keywords_str:
+            recall_tasks.append(retrieve_edge_details_for_recall(
+                keywords=edge_keywords_str,
+                relationships_vdb=relationships_vdb,
+                knowledge_graph_inst=knowledge_graph_inst,
+                text_chunks_db=text_chunks_db,
+                query_param=query_param
+            ))
+            edge_task_idx = len(recall_tasks) - 1
+            logger.debug(f"Added edge recall task for kg_direct_recall with keywords: '{edge_keywords_str}'")
+        else:
+            logger.warning("Skipping edge recall task: HL keywords string is empty.")
+
+    # 3. Execute Tasks
+    if not recall_tasks:
+        logger.warning(f"No recall tasks scheduled for mode '{query_param.mode}' based on extracted keywords. Returning empty list.")
+        return [], hl_keywords_list, ll_keywords_list # Return empty candidates but keep keywords
+
+    try:
+        all_recall_results = await asyncio.gather(*recall_tasks, return_exceptions=True)
+    except Exception as e:
+        logger.error(f"Critical error during asyncio.gather in kg_direct_recall: {e}", exc_info=True)
+        return [], hl_keywords_list, ll_keywords_list # Return empty candidates but keep keywords
+
+    # 4. Process and Combine Results (same logic as before)
+    final_candidates = []
+
+    if node_task_idx != -1:
+        result = all_recall_results[node_task_idx]
+        if isinstance(result, Exception):
+            logger.error(f"Node recall task (kg_direct_recall) failed: {result}", exc_info=result)
+        elif isinstance(result, list):
+            logger.info(f"kg_direct_recall retrieved {len(result)} node candidates.")
+            for node in result:
+                node['retrieval_type'] = 'node'
+            final_candidates.extend(result)
+        else:
+             logger.warning(f"Node recall task returned unexpected type: {type(result)}")
+
+    if edge_task_idx != -1:
+        result = all_recall_results[edge_task_idx]
+        if isinstance(result, Exception):
+            logger.error(f"Edge recall task (kg_direct_recall) failed: {result}", exc_info=result)
+        elif isinstance(result, list):
+            logger.info(f"kg_direct_recall retrieved {len(result)} edge candidates.")
+            for edge in result:
+                edge['retrieval_type'] = 'edge'
+            final_candidates.extend(result)
+        else:
+            logger.warning(f"Edge recall task returned unexpected type: {type(result)}")
+
+    # Sort combined list by score
+    final_candidates.sort(key=lambda x: x.get('score', float('inf')))
+
+    logger.info(f"kg_direct_recall completed, returning {len(final_candidates)} combined candidates after keyword extraction.")
+    return final_candidates, hl_keywords_list, ll_keywords_list
+# <<< END NEW DIRECT RECALL FUNCTION >>>

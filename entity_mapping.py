@@ -13,7 +13,7 @@ try:
     from lightrag.utils import logger
 except ImportError as e:
     print(f"Error importing lightrag components: {e}")
-    print("Please ensure lightrag is installed correctly.")
+    print("Please ensure lightrag and entity_mapping are available.")
     # Define logger as a basic logger if import fails, to allow script structure
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
