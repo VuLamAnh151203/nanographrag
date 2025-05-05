@@ -14,8 +14,9 @@ from lightrag.base import QueryParam
 from lightrag.lightrag_old import always_get_an_event_loop
 
 # Import entity mapping
-from entity_mapping import find_mapped_entity_description, find_mapped_edge_description
-
+# from entity_mapping import find_mapped_entity_description, find_mapped_edge_description
+# Import entity mapping
+from optimized_entity_mapping import find_mapped_entity_description, find_mapped_edge_description, BatchGraphMapper
 
 
 import os
@@ -266,7 +267,7 @@ class DualGraphQuery:
     Class for querying two knowledge graphs in different languages,
     mapping entities between them, and returning consolidated results.
     """
-    
+        
     def __init__(
         self,
         graph1_instance,
@@ -277,17 +278,7 @@ class DualGraphQuery:
         graph2_name: str = "graph2",
         mapping_sym_file: Optional[str] = None
     ):
-        """
-        Initialize dual graph querying with two LightRAG instances and entity mapping.
-        
-        Args:
-            graph1_instance: First LightRAG instance (primary language)
-            graph2_instance: Second LightRAG instance (secondary language)
-            mapping_file_path: Path to the entity/edge mapping JSON file
-            output_dir: Directory to save query results
-            graph1_name: Name identifier for the first graph
-            graph2_name: Name identifier for the second graph
-        """
+        """Initialize dual graph querying with two LightRAG instances and entity mapping."""
         self.graph1 = graph1_instance
         self.graph2 = graph2_instance
         self.mapping_file = mapping_file_path
@@ -302,6 +293,22 @@ class DualGraphQuery:
         # Validate mapping file exists
         if not os.path.exists(mapping_file_path):
             raise FileNotFoundError(f"Mapping file not found: {mapping_file_path}")
+
+        # Initialize BatchGraphMapper for faster mapping
+        self.batch_mapper = BatchGraphMapper(
+            mapping_file_path=mapping_file_path,
+            graph1_name=self.graph1_name,
+            graph2_name=self.graph2_name
+        )
+        
+        # Initialize BatchGraphMapper for symmetrical mapping if needed
+        self.sym_mapper = None
+        if mapping_sym_file and os.path.exists(mapping_sym_file):
+            self.sym_mapper = BatchGraphMapper(
+                mapping_file_path=mapping_sym_file,
+                graph1_name=self.graph1_name,
+                graph2_name=self.graph1_name
+            )
         
         logger.info(f"DualGraphQuery initialized with {graph1_name} and {graph2_name}")
     
@@ -411,173 +418,306 @@ class DualGraphQuery:
             logger.error(f"Error querying graph: {e}")
             return [], [], []
     
+    # def _map_graph2_to_graph1(
+    #     self, 
+    #     graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]]
+    # ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+    #     """Map entities and edges from graph2 to graph1 using the mapping file."""
+    #     candidates, hl_keywords, ll_keywords = graph2_results
+    #     mapped_candidates = []
+        
+    #     for candidate in candidates:
+    #         cand_type = candidate.get("retrieval_type")
+            
+    #         if cand_type == "node":
+    #             # Map entity node
+    #             entity_name = candidate.get("entity_name")
+    #             description = candidate.get("description", "")
+                
+    #             # Use entity mapping
+    #             mapped_result = find_mapped_entity_description(
+    #                 self.mapping_file,
+    #                 entity_name,
+    #                 description,
+    #                 source_graph_key_prefix=self.graph2_name,
+    #                 target_graph_key_prefix=self.graph1_name
+    #             )
+                
+    #             if mapped_result:
+    #                 print("mapp cross ne")
+    #                 mapped_entity, mapped_desc, mapped_chunkid = mapped_result
+    #                 mapped_candidate = candidate.copy()
+    #                 mapped_candidate["entity_name"] = mapped_entity
+    #                 mapped_candidate["description"] = mapped_desc
+    #                 mapped_candidate["original_entity"] = entity_name
+    #                 mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
+    #                 mapped_candidate["mapping_status"] = "mapped_success"
+    #                 # mapped_candidate["mapping_source"] = self.graph2_name
+                    
+    #                 mapped_candidates.append(mapped_candidate)
+    #             else:
+    #                 # Keep original if no mapping found, but mark it
+    #                 candidate["mapping_status"] = "unmapped"
+    #                 # mapped_candidates.append(candidate)
+                    
+    #         elif cand_type == "edge":
+    #             # Map edge
+    #             src_entity = candidate.get("src_id")
+    #             tgt_entity = candidate.get("tgt_id")
+    #             description = candidate.get("description", "")
+                
+    #             # Use edge mapping
+    #             mapped_result = find_mapped_edge_description(
+    #                 self.mapping_file,
+    #                 src_entity,
+    #                 tgt_entity,
+    #                 description,
+    #                 source_graph_key_prefix=self.graph2_name,
+    #                 target_graph_key_prefix=self.graph1_name
+    #             )
+                
+    #             if mapped_result:
+    #                 print("mapp cross ne")
+    #                 mapped_src, mapped_tgt, mapped_desc, mapped_chunkid = mapped_result
+    #                 mapped_candidate = candidate.copy()
+    #                 mapped_candidate["src_id"] = mapped_src
+    #                 mapped_candidate["tgt_id"] = mapped_tgt
+    #                 mapped_candidate["description"] = mapped_desc
+    #                 mapped_candidate["original_src"] = src_entity
+    #                 mapped_candidate["original_tgt"] = tgt_entity
+    #                 mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
+    #                 mapped_candidate["mapping_status"] = "mapped_success"
+    #                 # mapped_candidate["mapping_source"] = self.graph2_name
+    #                 mapped_candidates.append(mapped_candidate)
+    #             else:
+    #                 # Keep original if no mapping found, but mark it
+    #                 candidate["mapping_status"] = "unmapped"
+    #                 # mapped_candidates.append(candidate)
+    #         else:
+    #             # For other types, keep as is
+    #             mapped_candidates.append(candidate)
+        
+    #     return mapped_candidates, hl_keywords, ll_keywords
+
     def _map_graph2_to_graph1(
         self, 
         graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]]
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Map entities and edges from graph2 to graph1 using the mapping file."""
-        candidates, hl_keywords, ll_keywords = graph2_results
-        mapped_candidates = []
-        
-        for candidate in candidates:
-            cand_type = candidate.get("retrieval_type")
-            
-            if cand_type == "node":
-                # Map entity node
-                entity_name = candidate.get("entity_name")
-                description = candidate.get("description", "")
-                
-                # Use entity mapping
-                mapped_result = find_mapped_entity_description(
-                    self.mapping_file,
-                    entity_name,
-                    description,
-                    source_graph_key_prefix=self.graph2_name,
-                    target_graph_key_prefix=self.graph1_name
-                )
-                
-                if mapped_result:
-                    print("mapp cross ne")
-                    mapped_entity, mapped_desc, mapped_chunkid = mapped_result
-                    mapped_candidate = candidate.copy()
-                    mapped_candidate["entity_name"] = mapped_entity
-                    mapped_candidate["description"] = mapped_desc
-                    mapped_candidate["original_entity"] = entity_name
-                    mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
-                    mapped_candidate["mapping_status"] = "mapped_success"
-                    # mapped_candidate["mapping_source"] = self.graph2_name
-                    
-                    mapped_candidates.append(mapped_candidate)
-                else:
-                    # Keep original if no mapping found, but mark it
-                    candidate["mapping_status"] = "unmapped"
-                    # mapped_candidates.append(candidate)
-                    
-            elif cand_type == "edge":
-                # Map edge
-                src_entity = candidate.get("src_id")
-                tgt_entity = candidate.get("tgt_id")
-                description = candidate.get("description", "")
-                
-                # Use edge mapping
-                mapped_result = find_mapped_edge_description(
-                    self.mapping_file,
-                    src_entity,
-                    tgt_entity,
-                    description,
-                    source_graph_key_prefix=self.graph2_name,
-                    target_graph_key_prefix=self.graph1_name
-                )
-                
-                if mapped_result:
-                    print("mapp cross ne")
-                    mapped_src, mapped_tgt, mapped_desc, mapped_chunkid = mapped_result
-                    mapped_candidate = candidate.copy()
-                    mapped_candidate["src_id"] = mapped_src
-                    mapped_candidate["tgt_id"] = mapped_tgt
-                    mapped_candidate["description"] = mapped_desc
-                    mapped_candidate["original_src"] = src_entity
-                    mapped_candidate["original_tgt"] = tgt_entity
-                    mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
-                    mapped_candidate["mapping_status"] = "mapped_success"
-                    # mapped_candidate["mapping_source"] = self.graph2_name
-                    mapped_candidates.append(mapped_candidate)
-                else:
-                    # Keep original if no mapping found, but mark it
-                    candidate["mapping_status"] = "unmapped"
-                    # mapped_candidates.append(candidate)
-            else:
-                # For other types, keep as is
-                mapped_candidates.append(candidate)
-        
-        return mapped_candidates, hl_keywords, ll_keywords
+        # Use the batch mapper for better performance
+        return self.batch_mapper.map_graph2_to_graph1(graph2_results)
 
-    async  def _map_graph1_to_graph1(
+    # async  def _map_graph1_to_graph1(
+    #     self, 
+    #     graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]],
+    #     query_text: str = None,
+    #     max_threshold: Optional[float] = None
+    # ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+    #     """Map entities and edges from graph2 to graph1 using the mapping file."""
+    #     candidates, hl_keywords, ll_keywords = graph2_results
+    #     mapped_candidates = []
+        
+    #     for candidate in candidates:
+    #         cand_type = candidate.get("retrieval_type")
+            
+    #         if cand_type == "node":
+    #             # Map entity node
+    #             entity_name = candidate.get("entity_name")
+    #             description = candidate.get("description", "")
+                
+    #             # Use entity mapping
+    #             mapped_result = find_mapped_entity_description(
+    #                 self.mapping_sym_file,
+    #                 entity_name,
+    #                 description,
+    #                 source_graph_key_prefix=self.graph2_name,
+    #                 target_graph_key_prefix=self.graph1_name
+    #             )
+                
+    #             if mapped_result:
+    #                 mapped_entity, mapped_desc, _ = mapped_result
+    #                 chunk_id = await  self.graph1.a_most_relevant_text_chunks_from_nodes(query = query_text, list_nodes = [mapped_entity], threshold=max_threshold)
+    #                 chunk_id = chunk_id[mapped_entity] if chunk_id else None
+    #                 if chunk_id:
+    #                     print("mapp sym ne")
+    #                     mapped_candidate = candidate.copy()
+    #                     mapped_candidate["entity_name"] = mapped_entity
+    #                     mapped_candidate["description"] = mapped_desc
+    #                     mapped_candidate["original_entity"] = entity_name
+    #                     mapped_candidate['retrieved_chunk_id'] = chunk_id
+    #                     mapped_candidate["mapping_status"] = "mapped_sym_success"
+    #                     mapped_candidates.append(mapped_candidate)
+    #             else:
+    #                 # Keep original if no mapping found, but mark it
+    #                 candidate["mapping_status"] = "unmapped"
+    #                 # mapped_candidates.append(candidate)
+                    
+    #         elif cand_type == "edge":
+    #             # Map edge
+    #             src_entity = candidate.get("src_id")
+    #             tgt_entity = candidate.get("tgt_id")
+    #             description = candidate.get("description", "")
+                
+    #             # Use edge mapping
+    #             mapped_result = find_mapped_edge_description(
+    #                 self.mapping_file,
+    #                 src_entity,
+    #                 tgt_entity,
+    #                 description,
+    #                 source_graph_key_prefix=self.graph2_name,
+    #                 target_graph_key_prefix=self.graph1_name
+    #             )
+                
+    #             if mapped_result:
+    #                 mapped_src, mapped_tgt, mapped_desc,_ = mapped_result
+    #                 chunk_id = await  self.graph1.a_most_relevant_text_chunks_from_edges(query = query_text, list_edges = [(mapped_src,mapped_tgt)], threshold=max_threshold)
+    #                 mapped_chunkid = chunk_id[(mapped_src,mapped_tgt)] if chunk_id else None
+    #                 if mapped_chunkid:
+    #                     print("mapp sym ne")
+    #                     mapped_candidate = candidate.copy()
+    #                     mapped_candidate["src_id"] = mapped_src
+    #                     mapped_candidate["tgt_id"] = mapped_tgt
+    #                     mapped_candidate["description"] = mapped_desc
+    #                     mapped_candidate["original_src"] = src_entity
+    #                     mapped_candidate["original_tgt"] = tgt_entity
+    #                     mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
+    #                     mapped_candidate["mapping_status"] = "mapped_sym_success"
+    #                     mapped_candidates.append(mapped_candidate)
+    #             else:
+    #                 # Keep original if no mapping found, but mark it
+    #                 candidate["mapping_status"] = "unmapped"
+    #                 # mapped_candidates.append(candidate)
+    #         else:
+    #             # For other types, keep as is
+    #             mapped_candidates.append(candidate)
+        
+    #     return mapped_candidates, hl_keywords, ll_keywords
+
+    async def _map_graph1_to_graph1(
         self, 
-        graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]],
+        graph1_results: Tuple[List[Dict[str, Any]], List[str], List[str]],
         query_text: str = None,
         max_threshold: Optional[float] = None
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
-        """Map entities and edges from graph2 to graph1 using the mapping file."""
-        candidates, hl_keywords, ll_keywords = graph2_results
+        """Map entities and edges from graph1 to graph1 using the sym mapping file."""
+        candidates, hl_keywords, ll_keywords = graph1_results
         mapped_candidates = []
         
-        for candidate in candidates:
+        # If no symmetrical mapper is available, return empty results
+        if not self.sym_mapper:
+            return mapped_candidates, hl_keywords, ll_keywords
+        
+        # First, collect all entities and edges that need to be mapped
+        entities_to_map = []
+        entity_indices = []
+        edges_to_map = []
+        edge_indices = []
+        
+        for idx, candidate in enumerate(candidates):
             cand_type = candidate.get("retrieval_type")
             
             if cand_type == "node":
-                # Map entity node
                 entity_name = candidate.get("entity_name")
                 description = candidate.get("description", "")
-                
-                # Use entity mapping
-                mapped_result = find_mapped_entity_description(
-                    self.mapping_sym_file,
-                    entity_name,
-                    description,
-                    source_graph_key_prefix=self.graph2_name,
-                    target_graph_key_prefix=self.graph1_name
-                )
-                
-                if mapped_result:
-                    mapped_entity, mapped_desc, _ = mapped_result
-                    chunk_id = await  self.graph1.a_most_relevant_text_chunks_from_nodes(query = query_text, list_nodes = [mapped_entity], threshold=max_threshold)
-                    chunk_id = chunk_id[mapped_entity] if chunk_id else None
-                    if chunk_id:
-                        print("mapp sym ne")
-                        mapped_candidate = candidate.copy()
-                        mapped_candidate["entity_name"] = mapped_entity
-                        mapped_candidate["description"] = mapped_desc
-                        mapped_candidate["original_entity"] = entity_name
-                        mapped_candidate['retrieved_chunk_id'] = chunk_id
-                        mapped_candidate["mapping_status"] = "mapped_sym_success"
-                        mapped_candidates.append(mapped_candidate)
-                else:
-                    # Keep original if no mapping found, but mark it
-                    candidate["mapping_status"] = "unmapped"
-                    # mapped_candidates.append(candidate)
-                    
+                entities_to_map.append((entity_name, description, idx))
+                entity_indices.append(idx)
             elif cand_type == "edge":
-                # Map edge
                 src_entity = candidate.get("src_id")
                 tgt_entity = candidate.get("tgt_id")
                 description = candidate.get("description", "")
-                
-                # Use edge mapping
-                mapped_result = find_mapped_edge_description(
-                    self.mapping_file,
-                    src_entity,
-                    tgt_entity,
-                    description,
-                    source_graph_key_prefix=self.graph2_name,
-                    target_graph_key_prefix=self.graph1_name
+                edges_to_map.append((src_entity, tgt_entity, description, idx))
+                edge_indices.append(idx)
+        
+        # Process entities in batch
+        if entities_to_map:
+            # First, find all mapped entities
+            mapped_entities = {}
+            for entity_name, description, idx in entities_to_map:
+                mapped_result = self.sym_mapper.find_mapped_entity_description(entity_name, description)
+                if mapped_result:
+                    mapped_entity, mapped_desc, _ = mapped_result
+                    mapped_entities[idx] = (mapped_entity, mapped_desc)
+            
+            # Then, collect all entity names that need chunk lookup
+            entity_names_to_lookup = [ent_info[0] for idx, ent_info in mapped_entities.items()]
+            
+            # Batch lookup of chunks (this is an async operation that might be slow)
+            chunk_lookups = {}
+            if entity_names_to_lookup:
+                chunk_results = await self.graph1.a_most_relevant_text_chunks_from_nodes(
+                    query=query_text, 
+                    list_nodes=entity_names_to_lookup, 
+                    threshold=max_threshold
                 )
                 
+                # Map back to the original indices
+                for idx, (mapped_entity, mapped_desc) in mapped_entities.items():
+                    if mapped_entity in chunk_results:
+                        chunk_lookups[idx] = (mapped_entity, mapped_desc, chunk_results[mapped_entity])
+            
+            # Create mapped candidates
+            for idx, lookup_result in chunk_lookups.items():
+                mapped_entity, mapped_desc, chunk_id = lookup_result
+                original_candidate = candidates[idx]
+                entity_name = original_candidate.get("entity_name")
+                
+                # print("mapp sym ne")
+                mapped_candidate = original_candidate.copy()
+                mapped_candidate["entity_name"] = mapped_entity
+                mapped_candidate["description"] = mapped_desc
+                mapped_candidate["original_entity"] = entity_name
+                mapped_candidate['retrieved_chunk_id'] = chunk_id
+                mapped_candidate["mapping_status"] = "mapped_sym_success"
+                mapped_candidates.append(mapped_candidate)
+        
+        # Process edges in batch
+        if edges_to_map:
+            # First, find all mapped edges
+            mapped_edges = {}
+            for src_entity, tgt_entity, description, idx in edges_to_map:
+                mapped_result = self.sym_mapper.find_mapped_edge_description(
+                    src_entity, tgt_entity, description)
                 if mapped_result:
-                    mapped_src, mapped_tgt, mapped_desc,_ = mapped_result
-                    chunk_id = await  self.graph1.a_most_relevant_text_chunks_from_edges(query = query_text, list_edges = [(mapped_src,mapped_tgt)], threshold=max_threshold)
-                    mapped_chunkid = chunk_id[(mapped_src,mapped_tgt)] if chunk_id else None
-                    if mapped_chunkid:
-                        print("mapp sym ne")
-                        mapped_candidate = candidate.copy()
-                        mapped_candidate["src_id"] = mapped_src
-                        mapped_candidate["tgt_id"] = mapped_tgt
-                        mapped_candidate["description"] = mapped_desc
-                        mapped_candidate["original_src"] = src_entity
-                        mapped_candidate["original_tgt"] = tgt_entity
-                        mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
-                        mapped_candidate["mapping_status"] = "mapped_sym_success"
-                        mapped_candidates.append(mapped_candidate)
-                else:
-                    # Keep original if no mapping found, but mark it
-                    candidate["mapping_status"] = "unmapped"
-                    # mapped_candidates.append(candidate)
-            else:
-                # For other types, keep as is
-                mapped_candidates.append(candidate)
+                    mapped_src, mapped_tgt, mapped_desc, _ = mapped_result
+                    mapped_edges[idx] = (mapped_src, mapped_tgt, mapped_desc)
+            
+            # Then, collect all edge pairs that need chunk lookup
+            edge_pairs_to_lookup = [(edge_info[0], edge_info[1]) for idx, edge_info in mapped_edges.items()]
+            print(edge_pairs_to_lookup)
+            # Batch lookup of chunks
+            chunk_lookups = {}
+            if edge_pairs_to_lookup:
+                chunk_results = await self.graph1.a_most_relevant_text_chunks_from_edges(
+                    query=query_text, 
+                    list_edges=edge_pairs_to_lookup, 
+                    threshold=max_threshold
+                )
+                
+                # Map back to the original indices
+                for idx, (mapped_src, mapped_tgt, mapped_desc) in mapped_edges.items():
+                    edge_key = (mapped_src, mapped_tgt)
+                    if edge_key in chunk_results:
+                        chunk_lookups[idx] = (mapped_src, mapped_tgt, mapped_desc, chunk_results[edge_key])
+            
+            # Create mapped candidates
+            for idx, lookup_result in chunk_lookups.items():
+                mapped_src, mapped_tgt, mapped_desc, chunk_id = lookup_result
+                original_candidate = candidates[idx]
+                src_entity = original_candidate.get("src_id")
+                tgt_entity = original_candidate.get("tgt_id")
+                
+                # print("mapp sym ne")
+                mapped_candidate = original_candidate.copy()
+                mapped_candidate["src_id"] = mapped_src
+                mapped_candidate["tgt_id"] = mapped_tgt
+                mapped_candidate["description"] = mapped_desc
+                mapped_candidate["original_src"] = src_entity
+                mapped_candidate["original_tgt"] = tgt_entity
+                mapped_candidate['retrieved_chunk_id'] = chunk_id
+                mapped_candidate["mapping_status"] = "mapped_sym_success"
+                mapped_candidates.append(mapped_candidate)
         
         return mapped_candidates, hl_keywords, ll_keywords
-
 
     
     def _merge_results(

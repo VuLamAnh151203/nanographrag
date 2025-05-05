@@ -1117,3 +1117,118 @@
 2025-05-05 20:42:21,944 - lightrag - INFO - kg_direct_recall completed, returning 11 combined candidates after keyword extraction.
 2025-05-05 20:42:21,944 - lightrag - INFO - anew_retrieval completed. Returning 11 candidates, 1 HL keywords, 1 LL keywords.
 2025-05-05 20:43:18,223 - lightrag - INFO - Results saved to test/query_ai_đã_viết_phần_độc_tấu_guitar.jsonl
+2025-05-05 21:39:20,260 - lightrag - INFO - Logger initialized for working directory: /home/hungpv/projects/TN/LIGHTRAG/new_nq_en_without_embedding
+2025-05-05 21:39:20,262 - lightrag - INFO - Load KV llm_response_cache with 0 data
+2025-05-05 21:39:20,353 - lightrag - INFO - Load KV full_docs with 9633 data
+2025-05-05 21:39:20,456 - lightrag - INFO - Load KV text_chunks with 9633 data
+2025-05-05 21:39:32,581 - lightrag - INFO - Loaded graph from /home/hungpv/projects/TN/LIGHTRAG/new_nq_en_without_embedding/graph_chunk_entity_relation.graphml with 66069 nodes, 82227 edges
+2025-05-05 21:39:51,816 - lightrag - INFO - Loaded document status storage with 9633 records
+2025-05-05 21:39:55,615 - lightrag - INFO - Logger initialized for working directory: /home/hungpv/projects/TN/LIGHTRAG/new_nq_vi_without_embedding
+2025-05-05 21:39:55,615 - lightrag - INFO - Load KV llm_response_cache with 0 data
+2025-05-05 21:39:55,723 - lightrag - INFO - Load KV full_docs with 9633 data
+2025-05-05 21:39:55,855 - lightrag - INFO - Load KV text_chunks with 9633 data
+2025-05-05 21:40:02,541 - lightrag - INFO - Loaded graph from /home/hungpv/projects/TN/LIGHTRAG/new_nq_vi_without_embedding/graph_chunk_entity_relation.graphml with 62071 nodes, 73013 edges
+2025-05-05 21:40:17,694 - lightrag - INFO - Loaded document status storage with 9633 records
+2025-05-05 21:40:28,127 - lightrag - INFO - DualGraphQuery initialized with GRAPH1_NAME and GRAPH2_NAME
+2025-05-05 21:40:28,128 - lightrag - INFO - Querying with mode: hybrid
+2025-05-05 21:40:28,128 - lightrag - INFO - Executing anew_retrieval with mode: hybrid
+2025-05-05 21:40:28,128 - lightrag - INFO - Executing kg_direct_recall with mode: QueryParam(mode='hybrid', unique_entity_edge=False, use_query_for_retrieval=True, retrieval_mode='original', retrieval_nodes=False, ll_keyword_only=False, only_need_context=False, only_need_prompt=False, response_type='Multiple Paragraphs', stream=False, top_k=10, max_token_for_text_unit=4000, max_token_for_global_context=20000, max_token_for_local_context=8000, hl_keywords=[], ll_keywords=[], conversation_history=[], history_turns=3)
+2025-05-05 21:40:28,128 - lightrag - INFO - Executing anew_retrieval with mode: hybrid
+2025-05-05 21:40:28,128 - lightrag - INFO - Executing kg_direct_recall with mode: QueryParam(mode='hybrid', unique_entity_edge=False, use_query_for_retrieval=True, retrieval_mode='original', retrieval_nodes=False, ll_keyword_only=False, only_need_context=False, only_need_prompt=False, response_type='Multiple Paragraphs', stream=False, top_k=10, max_token_for_text_unit=4000, max_token_for_global_context=20000, max_token_for_local_context=8000, hl_keywords=[], ll_keywords=[], conversation_history=[], history_turns=3)
+2025-05-05 21:40:28,128 - lightrag - INFO - Retrieving node details for recall: 'ai đã viết phần độc tấu guitar trong beat it', top_k: 10
+2025-05-05 21:40:30,934 - lightrag - INFO - Filtered VDB results down to 7 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:40:30,934 - lightrag - INFO - Retrieving edge details for recall: keywords='ai đã viết phần độc tấu guitar trong beat it', top_k=10, unique_mode=False
+2025-05-05 21:40:31,056 - lightrag - INFO - Filtered relationship VDB results down to 7 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:40:31,056 - lightrag - INFO - Retrieving node details for recall: 'ai đã viết phần độc tấu guitar trong beat it', top_k: 10
+2025-05-05 21:40:32,597 - lightrag - INFO - Filtered VDB results down to 5 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:40:32,597 - lightrag - INFO - Retrieving edge details for recall: keywords='ai đã viết phần độc tấu guitar trong beat it', top_k=10, unique_mode=False
+2025-05-05 21:40:32,693 - lightrag - INFO - Filtered relationship VDB results down to 6 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:40:32,694 - lightrag - INFO - Returning 7 node detail results for recall.
+2025-05-05 21:40:32,694 - lightrag - INFO - Returning 7 edge detail results for recall, including appearance counts.
+2025-05-05 21:40:32,694 - lightrag - INFO - Returning 5 node detail results for recall.
+2025-05-05 21:40:32,695 - lightrag - INFO - Returning 6 edge detail results for recall, including appearance counts.
+2025-05-05 21:40:32,695 - lightrag - INFO - kg_direct_recall retrieved 7 node candidates.
+2025-05-05 21:40:32,695 - lightrag - INFO - kg_direct_recall retrieved 7 edge candidates.
+2025-05-05 21:40:32,695 - lightrag - INFO - kg_direct_recall completed, returning 14 combined candidates after keyword extraction.
+2025-05-05 21:40:32,695 - lightrag - INFO - anew_retrieval completed. Returning 14 candidates, 1 HL keywords, 1 LL keywords.
+2025-05-05 21:40:32,695 - lightrag - INFO - kg_direct_recall retrieved 5 node candidates.
+2025-05-05 21:40:32,695 - lightrag - INFO - kg_direct_recall retrieved 6 edge candidates.
+2025-05-05 21:40:32,695 - lightrag - INFO - kg_direct_recall completed, returning 11 combined candidates after keyword extraction.
+2025-05-05 21:40:32,695 - lightrag - INFO - anew_retrieval completed. Returning 11 candidates, 1 HL keywords, 1 LL keywords.
+2025-05-05 21:42:36,576 - lightrag - INFO - Logger initialized for working directory: /home/hungpv/projects/TN/LIGHTRAG/new_nq_en_without_embedding
+2025-05-05 21:42:36,578 - lightrag - INFO - Load KV llm_response_cache with 0 data
+2025-05-05 21:42:36,655 - lightrag - INFO - Load KV full_docs with 9633 data
+2025-05-05 21:42:36,751 - lightrag - INFO - Load KV text_chunks with 9633 data
+2025-05-05 21:42:47,539 - lightrag - INFO - Loaded graph from /home/hungpv/projects/TN/LIGHTRAG/new_nq_en_without_embedding/graph_chunk_entity_relation.graphml with 66069 nodes, 82227 edges
+2025-05-05 21:43:05,449 - lightrag - INFO - Loaded document status storage with 9633 records
+2025-05-05 21:43:08,647 - lightrag - INFO - Logger initialized for working directory: /home/hungpv/projects/TN/LIGHTRAG/new_nq_vi_without_embedding
+2025-05-05 21:43:08,647 - lightrag - INFO - Load KV llm_response_cache with 0 data
+2025-05-05 21:43:08,740 - lightrag - INFO - Load KV full_docs with 9633 data
+2025-05-05 21:43:08,868 - lightrag - INFO - Load KV text_chunks with 9633 data
+2025-05-05 21:43:15,565 - lightrag - INFO - Loaded graph from /home/hungpv/projects/TN/LIGHTRAG/new_nq_vi_without_embedding/graph_chunk_entity_relation.graphml with 62071 nodes, 73013 edges
+2025-05-05 21:43:31,044 - lightrag - INFO - Loaded document status storage with 9633 records
+2025-05-05 21:43:41,622 - lightrag - INFO - DualGraphQuery initialized with GRAPH1_NAME and GRAPH2_NAME
+2025-05-05 21:43:41,622 - lightrag - INFO - Querying with mode: hybrid
+2025-05-05 21:43:41,622 - lightrag - INFO - Executing anew_retrieval with mode: hybrid
+2025-05-05 21:43:41,622 - lightrag - INFO - Executing kg_direct_recall with mode: QueryParam(mode='hybrid', unique_entity_edge=False, use_query_for_retrieval=True, retrieval_mode='original', retrieval_nodes=False, ll_keyword_only=False, only_need_context=False, only_need_prompt=False, response_type='Multiple Paragraphs', stream=False, top_k=10, max_token_for_text_unit=4000, max_token_for_global_context=20000, max_token_for_local_context=8000, hl_keywords=[], ll_keywords=[], conversation_history=[], history_turns=3)
+2025-05-05 21:43:41,622 - lightrag - INFO - Executing anew_retrieval with mode: hybrid
+2025-05-05 21:43:41,623 - lightrag - INFO - Executing kg_direct_recall with mode: QueryParam(mode='hybrid', unique_entity_edge=False, use_query_for_retrieval=True, retrieval_mode='original', retrieval_nodes=False, ll_keyword_only=False, only_need_context=False, only_need_prompt=False, response_type='Multiple Paragraphs', stream=False, top_k=10, max_token_for_text_unit=4000, max_token_for_global_context=20000, max_token_for_local_context=8000, hl_keywords=[], ll_keywords=[], conversation_history=[], history_turns=3)
+2025-05-05 21:43:41,623 - lightrag - INFO - Retrieving node details for recall: 'ai đã viết phần độc tấu guitar trong beat it', top_k: 10
+2025-05-05 21:43:43,388 - lightrag - INFO - Filtered VDB results down to 7 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:43:43,388 - lightrag - INFO - Retrieving edge details for recall: keywords='ai đã viết phần độc tấu guitar trong beat it', top_k=10, unique_mode=False
+2025-05-05 21:43:43,434 - lightrag - INFO - Filtered relationship VDB results down to 7 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:43:43,434 - lightrag - INFO - Retrieving node details for recall: 'ai đã viết phần độc tấu guitar trong beat it', top_k: 10
+2025-05-05 21:43:44,001 - lightrag - INFO - Filtered VDB results down to 5 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:43:44,001 - lightrag - INFO - Retrieving edge details for recall: keywords='ai đã viết phần độc tấu guitar trong beat it', top_k=10, unique_mode=False
+2025-05-05 21:43:44,046 - lightrag - INFO - Filtered relationship VDB results down to 6 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:43:44,046 - lightrag - INFO - Returning 7 node detail results for recall.
+2025-05-05 21:43:44,046 - lightrag - INFO - Returning 7 edge detail results for recall, including appearance counts.
+2025-05-05 21:43:44,047 - lightrag - INFO - Returning 5 node detail results for recall.
+2025-05-05 21:43:44,047 - lightrag - INFO - Returning 6 edge detail results for recall, including appearance counts.
+2025-05-05 21:43:44,047 - lightrag - INFO - kg_direct_recall retrieved 7 node candidates.
+2025-05-05 21:43:44,047 - lightrag - INFO - kg_direct_recall retrieved 7 edge candidates.
+2025-05-05 21:43:44,047 - lightrag - INFO - kg_direct_recall completed, returning 14 combined candidates after keyword extraction.
+2025-05-05 21:43:44,047 - lightrag - INFO - anew_retrieval completed. Returning 14 candidates, 1 HL keywords, 1 LL keywords.
+2025-05-05 21:43:44,047 - lightrag - INFO - kg_direct_recall retrieved 5 node candidates.
+2025-05-05 21:43:44,047 - lightrag - INFO - kg_direct_recall retrieved 6 edge candidates.
+2025-05-05 21:43:44,047 - lightrag - INFO - kg_direct_recall completed, returning 11 combined candidates after keyword extraction.
+2025-05-05 21:43:44,047 - lightrag - INFO - anew_retrieval completed. Returning 11 candidates, 1 HL keywords, 1 LL keywords.
+2025-05-05 21:46:44,798 - lightrag - INFO - Logger initialized for working directory: /home/hungpv/projects/TN/LIGHTRAG/new_nq_en_without_embedding
+2025-05-05 21:46:44,800 - lightrag - INFO - Load KV llm_response_cache with 0 data
+2025-05-05 21:46:44,881 - lightrag - INFO - Load KV full_docs with 9633 data
+2025-05-05 21:46:44,972 - lightrag - INFO - Load KV text_chunks with 9633 data
+2025-05-05 21:46:55,941 - lightrag - INFO - Loaded graph from /home/hungpv/projects/TN/LIGHTRAG/new_nq_en_without_embedding/graph_chunk_entity_relation.graphml with 66069 nodes, 82227 edges
+2025-05-05 21:47:13,828 - lightrag - INFO - Loaded document status storage with 9633 records
+2025-05-05 21:47:16,929 - lightrag - INFO - Logger initialized for working directory: /home/hungpv/projects/TN/LIGHTRAG/new_nq_vi_without_embedding
+2025-05-05 21:47:16,929 - lightrag - INFO - Load KV llm_response_cache with 0 data
+2025-05-05 21:47:17,026 - lightrag - INFO - Load KV full_docs with 9633 data
+2025-05-05 21:47:17,140 - lightrag - INFO - Load KV text_chunks with 9633 data
+2025-05-05 21:47:23,860 - lightrag - INFO - Loaded graph from /home/hungpv/projects/TN/LIGHTRAG/new_nq_vi_without_embedding/graph_chunk_entity_relation.graphml with 62071 nodes, 73013 edges
+2025-05-05 21:47:38,630 - lightrag - INFO - Loaded document status storage with 9633 records
+2025-05-05 21:47:48,172 - lightrag - INFO - DualGraphQuery initialized with GRAPH1_NAME and GRAPH2_NAME
+2025-05-05 21:47:48,172 - lightrag - INFO - Querying with mode: hybrid
+2025-05-05 21:47:48,172 - lightrag - INFO - Executing anew_retrieval with mode: hybrid
+2025-05-05 21:47:48,172 - lightrag - INFO - Executing kg_direct_recall with mode: QueryParam(mode='hybrid', unique_entity_edge=False, use_query_for_retrieval=True, retrieval_mode='original', retrieval_nodes=False, ll_keyword_only=False, only_need_context=False, only_need_prompt=False, response_type='Multiple Paragraphs', stream=False, top_k=10, max_token_for_text_unit=4000, max_token_for_global_context=20000, max_token_for_local_context=8000, hl_keywords=[], ll_keywords=[], conversation_history=[], history_turns=3)
+2025-05-05 21:47:48,173 - lightrag - INFO - Executing anew_retrieval with mode: hybrid
+2025-05-05 21:47:48,173 - lightrag - INFO - Executing kg_direct_recall with mode: QueryParam(mode='hybrid', unique_entity_edge=False, use_query_for_retrieval=True, retrieval_mode='original', retrieval_nodes=False, ll_keyword_only=False, only_need_context=False, only_need_prompt=False, response_type='Multiple Paragraphs', stream=False, top_k=10, max_token_for_text_unit=4000, max_token_for_global_context=20000, max_token_for_local_context=8000, hl_keywords=[], ll_keywords=[], conversation_history=[], history_turns=3)
+2025-05-05 21:47:48,173 - lightrag - INFO - Retrieving node details for recall: 'ai đã viết phần độc tấu guitar trong beat it', top_k: 10
+2025-05-05 21:47:49,723 - lightrag - INFO - Filtered VDB results down to 7 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:47:49,723 - lightrag - INFO - Retrieving edge details for recall: keywords='ai đã viết phần độc tấu guitar trong beat it', top_k=10, unique_mode=False
+2025-05-05 21:47:49,768 - lightrag - INFO - Filtered relationship VDB results down to 7 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:47:49,768 - lightrag - INFO - Retrieving node details for recall: 'ai đã viết phần độc tấu guitar trong beat it', top_k: 10
+2025-05-05 21:47:50,345 - lightrag - INFO - Filtered VDB results down to 5 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:47:50,345 - lightrag - INFO - Retrieving edge details for recall: keywords='ai đã viết phần độc tấu guitar trong beat it', top_k=10, unique_mode=False
+2025-05-05 21:47:50,393 - lightrag - INFO - Filtered relationship VDB results down to 6 candidates based on mode, with counts accumulated during filtering.
+2025-05-05 21:47:50,394 - lightrag - INFO - Returning 7 node detail results for recall.
+2025-05-05 21:47:50,394 - lightrag - INFO - Returning 7 edge detail results for recall, including appearance counts.
+2025-05-05 21:47:50,394 - lightrag - INFO - Returning 5 node detail results for recall.
+2025-05-05 21:47:50,395 - lightrag - INFO - Returning 6 edge detail results for recall, including appearance counts.
+2025-05-05 21:47:50,395 - lightrag - INFO - kg_direct_recall retrieved 7 node candidates.
+2025-05-05 21:47:50,395 - lightrag - INFO - kg_direct_recall retrieved 7 edge candidates.
+2025-05-05 21:47:50,395 - lightrag - INFO - kg_direct_recall completed, returning 14 combined candidates after keyword extraction.
+2025-05-05 21:47:50,395 - lightrag - INFO - anew_retrieval completed. Returning 14 candidates, 1 HL keywords, 1 LL keywords.
+2025-05-05 21:47:50,395 - lightrag - INFO - kg_direct_recall retrieved 5 node candidates.
+2025-05-05 21:47:50,395 - lightrag - INFO - kg_direct_recall retrieved 6 edge candidates.
+2025-05-05 21:47:50,395 - lightrag - INFO - kg_direct_recall completed, returning 11 combined candidates after keyword extraction.
+2025-05-05 21:47:50,395 - lightrag - INFO - anew_retrieval completed. Returning 11 candidates, 1 HL keywords, 1 LL keywords.
+2025-05-05 21:47:51,074 - lightrag - INFO - Results saved to test/query_ai_đã_viết_phần_độc_tấu_guitar.jsonl

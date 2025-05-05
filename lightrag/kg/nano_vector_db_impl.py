@@ -394,7 +394,7 @@ def load_vdb_data(file_path: str) -> Dict[str, Any]:
         logger.error(f"Error loading VDB file {file_path}: {e}")
         raise
 
-def find_vdb_entry_pairs(vdb1: Dict[str, Any], vdb2: Dict[str, Any], threshold: float = 0.8, max_threshold: float = 1.0) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
+def find_vdb_entry_pairs(vdb1: Dict[str, Any], vdb2: Dict[str, Any], threshold: float = 0.8, max_threshold: float = None) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
     """
     Find similar entry pairs between two VDBs based on cosine similarity.
 
@@ -432,7 +432,10 @@ def find_vdb_entry_pairs(vdb1: Dict[str, Any], vdb2: Dict[str, Any], threshold: 
         logger.info(f"Similarity computation took {time.time() - start_time:.2f} seconds.")
 
         # Find pairs above threshold using np.where for efficiency
-        matches = np.where(similarity >= threshold)
+        if max_threshold is None:
+            matches = np.where(similarity >= threshold)
+        else:
+            matches = np.where((similarity >= threshold) & (similarity < max_threshold))
         logger.info(f"Found {len(matches[0])} potential pairs above threshold {threshold}.")
 
         pairs = []
@@ -631,7 +634,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
             logger.error(f"Error finding and storing similar pairs: {e}")
             raise
 
-    async def find_similar_vdb_pairs(self, vdb1_path: str, vdb2_path: str, threshold: float = 0.8, max_threshold: float = 1) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
+    async def find_similar_vdb_pairs(self, vdb1_path: str, vdb2_path: str, threshold: float = 0.8, max_threshold: float = None) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
         """
         Loads two VDB files and finds pairs of entries with similarity above a threshold.
 

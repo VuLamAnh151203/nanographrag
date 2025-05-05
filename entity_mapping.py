@@ -378,7 +378,7 @@ def main():
     parser.add_argument("--output", required=True, help="Directory to save mapping results")
     parser.add_argument("--threshold", type=float, default=0.8, help="Similarity threshold")
     parser.add_argument("--embedding_dim", type=int, default=1024, help="Dimension of embeddings used in VDBs")
-    parser.add_argument("--max_threshold", type=float, default=1, help="Similarity threshold")
+    parser.add_argument("--max_threshold", type=float, default=None, help="Similarity threshold")
 
     args = parser.parse_args()
 

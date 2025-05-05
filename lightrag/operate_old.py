@@ -3457,7 +3457,7 @@ async def _most_relevant_text_chunks_from_edges(
         edge_data = await knowledge_graph_inst.get_edge_data(tgt,head)
 
     list_hash_id = [compute_mdhash_id(head + tgt + des,prefix="rel-") for des in list(edge_data["description"].split("<SEP>"))]
-    list_hash_id_reverse = [compute_mdhash_id(tgt + + des,prefix="rel-") for des in list(edge_data["description"].split("<SEP>"))]
+    list_hash_id_reverse = [compute_mdhash_id(tgt + head + des,prefix="rel-") for des in list(edge_data["description"].split("<SEP>"))]
 
     filter_lambda = lambda x : x["__id__"] in list_hash_id
     filter_lambda_reverse = lambda x : x["__id__"] in list_hash_id_reverse
