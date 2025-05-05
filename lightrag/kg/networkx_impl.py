@@ -179,3 +179,9 @@ class NetworkXStorage(BaseGraphStorage):
         self, node_label: str, max_depth: int = 5
     ) -> KnowledgeGraph:
         raise NotImplementedError
+
+    async def get_node_data(self, node_id: str) -> dict | None:
+        return self._graph.nodes[node_id]
+
+    async def get_edge_data(self, head, tgt):
+        return self._graph.edges[head, tgt]

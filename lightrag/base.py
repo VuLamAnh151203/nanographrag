@@ -41,6 +41,7 @@ class QueryParam:
     - "mix": Integrates knowledge graph and vector retrieval.
     """
     unique_entity_edge: bool = False
+    use_query_for_retrieval: bool = True
     retrieval_mode: str = "original"
     retrieval_nodes: bool = False
 
@@ -57,7 +58,7 @@ class QueryParam:
     stream: bool = False
     """If True, enables streaming output for real-time responses."""
 
-    top_k: int = int(os.getenv("TOP_K", "60"))
+    top_k: int = int(os.getenv("TOP_K", "10"))
     """Number of top items to retrieve. Represents entities in 'local' mode and relationships in 'global' mode."""
 
     max_token_for_text_unit: int = int(os.getenv("MAX_TOKEN_TEXT_CHUNK", "4000"))

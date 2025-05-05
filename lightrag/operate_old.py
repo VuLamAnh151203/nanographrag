@@ -632,16 +632,16 @@ def log_query_result(query_key, keywords, filename='results.jsonl'):
         json.dump({query_key: keywords}, f, ensure_ascii=False)
         f.write('\n')
 
-# def is_query_cached(query_key, filename='results.jsonl'):
-#     with open(filename, 'r', encoding='utf-8') as f:
-#         for line in f:
-#             try:
-#                 record = json.loads(line)
-#                 if query_key in record:
-#                     return record[query_key]
-#             except json.JSONDecodeError:
-#                 continue  # Skip malformed lines
-#     return None
+def is_query_cached(query_key, filename='results.jsonl'):
+    with open(filename, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                record = json.loads(line)
+                if query_key in record:
+                    return record[query_key]
+            except json.JSONDecodeError:
+                continue  # Skip malformed lines
+    return None
 
 def is_query_cached(query_key, query_dict):
     return query_dict.get(query_key, None)
@@ -666,26 +666,18 @@ async def kg_retrieval(
     if cached_response is not None:
         return cached_response
     
-    # cache_keywords = is_query_cached(query,global_config["cache_queries"])
-    cache_keywords = None
-    if cache_keywords:
-        logger.info(f"Get cache for queries:{query}")
-        hl_keywords, ll_keywords = cache_keywords["hl_keywords"], cache_keywords["ll_keywords"]
-    else:
-        # Extract keywords using extract_keywords_only function which already supports conversation history
+    cache_keywords = is_query_cached(query,global_config["cache_queries"])
+    # if cache_keywords:
+    #     logger.info(f"Get cache for queries:{query}")
+    #     hl_keywords, ll_keywords = cache_keywords["hl_keywords"], cache_keywords["ll_keywords"]
+    # else:
+    # Extract keywords using extract_keywords_only function which already supports conversation history
+    if not query_param.use_query_for_retrieval:
         hl_keywords, ll_keywords = await extract_keywords_only(
-            query, query_param, global_config, hashing_kv
+            query, query_param, global_config, hashing_kv,cache_keywords
         )
-        # log_query_result(query, {"hl_keywords" : hl_keywords, "ll_keywords" : ll_keywords}, global_config["cache_queries_file"])
-
-    # store it in the json file 
-
-
-
-
-    logger.debug(f"High-level keywords: {hl_keywords}")
-    logger.debug(f"Low-level  keywords: {ll_keywords}")
-
+        logger.debug(f"High-level keywords: {hl_keywords}")
+        logger.debug(f"Low-level  keywords: {ll_keywords}")
     # Handle empty keywords
     # if hl_keywords == [] and ll_keywords == []:
     #     logger.warning("low_level_keywords and high_level_keywords is empty")
@@ -703,8 +695,11 @@ async def kg_retrieval(
     #     )
     #     query_param.mode = "local"
 
-    ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
-    hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+    if not query_param.use_query_for_retrieval:
+        ll_keywords_str = ", ".join(ll_keywords) if ll_keywords else ""
+        hl_keywords_str = ", ".join(hl_keywords) if hl_keywords else ""
+    else:
+        ll_keywords_str, hl_keywords_str = query, query
 
     # Build context
     # chunk_list = await _build_retrieval_context(
@@ -877,7 +872,7 @@ async def kg_query(
     )
     if cached_response is not None:
         return cached_response
-
+    
     # Extract keywords using extract_keywords_only function which already supports conversation history
     hl_keywords, ll_keywords = await extract_keywords_only(
         query, query_param, global_config, hashing_kv
@@ -980,6 +975,7 @@ async def extract_keywords_only(
     param: QueryParam,
     global_config: dict[str, str],
     hashing_kv: BaseKVStorage | None = None,
+    cache_keywords: Dict = None
 ) -> tuple[list[str], list[str]]:
     """
     Extract high-level and low-level keywords from the given 'text' using the LLM.
@@ -999,13 +995,19 @@ async def extract_keywords_only(
     if cached_response is not None:
         try:
             keywords_data = json.loads(cached_response)
-            return keywords_data["high_level_keywords"], keywords_data[
+            hl_keywords, ll_keywords = keywords_data["high_level_keywords"], keywords_data[
                 "low_level_keywords"
             ]
+            if not cache_keywords:
+                log_query_result(text, {"hl_keywords" : hl_keywords, "ll_keywords" : ll_keywords}, global_config["cache_queries_file"])
+            return hl_keywords, ll_keywords
         except (json.JSONDecodeError, KeyError):
             logger.warning(
                 "Invalid cache format for keywords, proceeding with extraction"
             )
+    if cache_keywords:
+        hl_keywords, ll_keywords = cache_keywords["hl_keywords"], cache_keywords["ll_keywords"]
+        return hl_keywords, ll_keywords
 
     # 2. Build the examples
     example_number = global_config["addon_params"].get("example_number", None)
@@ -1075,6 +1077,7 @@ async def extract_keywords_only(
                 cache_type="keywords",
             ),
         )
+    log_query_result(text, {"hl_keywords" : hl_keywords, "ll_keywords" : ll_keywords}, global_config["cache_queries_file"])
     return hl_keywords, ll_keywords
 
 
@@ -2324,44 +2327,43 @@ async def _find_related_text_unit_from_relationships(
     return all_text_units,text_unit_per_edges
 
 
-async def get_chunk_ids_from_entity_or_edge(
-    item_id: str | tuple[str, str],
-    knowledge_graph_inst: BaseGraphStorage,
-    text_chunks_db: BaseKVStorage,
-):
-    """
-    Retrieve all chunk IDs associated with an entity node or an edge.
+# async def get_chunk_ids_from_entity_or_edge(
+#     item_id: str | tuple[str, str],
+#     knowledge_graph_inst: BaseGraphStorage
+# ):
+#     """
+#     Retrieve all chunk IDs associated with an entity node or an edge.
     
-    Args:
-        item_id: Either a string (entity node ID) or a tuple of two strings (source and target IDs for an edge)
-        knowledge_graph_inst: Instance of BaseGraphStorage for accessing the knowledge graph
-        text_chunks_db: Instance of BaseKVStorage for accessing text chunks
+#     Args:
+#         item_id: Either a string (entity node ID) or a tuple of two strings (source and target IDs for an edge)
+#         knowledge_graph_inst: Instance of BaseGraphStorage for accessing the knowledge graph
+#         text_chunks_db: Instance of BaseKVStorage for accessing text chunks
         
-    Returns:
-        list[str]: List of chunk IDs associated with the entity or edge
-    """
-    if isinstance(item_id, tuple) and len(item_id) == 2:
-        # Handle edge case - get chunks from the edge
-        src_id, tgt_id = item_id
-        edge_data = await knowledge_graph_inst.get_edge(src_id, tgt_id)
+#     Returns:
+#         list[str]: List of chunk IDs associated with the entity or edge
+#     """
+#     if isinstance(item_id, tuple) and len(item_id) == 2:
+#         # Handle edge case - get chunks from the edge
+#         src_id, tgt_id = item_id
+#         edge_data = await knowledge_graph_inst.get_edge(src_id, tgt_id)
         
-        if edge_data is None or "source_id" not in edge_data:
-            logger.warning(f"Edge <{src_id},{tgt_id}> not found or doesn't have source_id")
-            return []
+#         if edge_data is None or "source_id" not in edge_data:
+#             logger.warning(f"Edge <{src_id},{tgt_id}> not found or doesn't have source_id")
+#             return []
             
-        chunk_ids = split_string_by_multi_markers(edge_data["source_id"], [GRAPH_FIELD_SEP])
-        return chunk_ids
+#         chunk_ids = split_string_by_multi_markers(edge_data["source_id"], [GRAPH_FIELD_SEP])
+#         return chunk_ids
         
-    else:
-        # Handle entity node case
-        node_data = await knowledge_graph_inst.get_node(item_id)
+#     else:
+#         # Handle entity node case
+#         node_data = await knowledge_graph_inst.get_node(item_id)
         
-        if node_data is None or "source_id" not in node_data:
-            logger.warning(f"Entity node {item_id} not found or doesn't have source_id")
-            return []
+#         if node_data is None or "source_id" not in node_data:
+#             logger.warning(f"Entity node {item_id} not found or doesn't have source_id")
+#             return []
             
-        chunk_ids = split_string_by_multi_markers(node_data["source_id"], [GRAPH_FIELD_SEP])
-        return chunk_ids
+#         chunk_ids = split_string_by_multi_markers(node_data["source_id"], [GRAPH_FIELD_SEP])
+#         return chunk_ids
 
 
 # # Lấy chunk ID từ một entity node
@@ -2711,6 +2713,8 @@ async def retrieve_node_details_for_recall(
     # 1. Truy vấn Vector Store của Thực thể (entities_vdb)
     try:
         vdb_results = await entities_vdb.query(query, top_k=query_param.top_k)
+        print("oke vdb khong")
+        # print(vdb_results)
     except Exception as e:
         logger.error(f"Error querying entities_vdb: {e}")
         return []
@@ -2724,9 +2728,10 @@ async def retrieve_node_details_for_recall(
     entity_counts = Counter()
     chunk_counts = Counter()
     result_chosen = []
-    top_k_candidates = 100 # Limit for candidates after filtering
-
+    top_k_candidates = 300 # Limit for candidates after filtering
+    # print("den day chua")
     if getattr(query_param, 'unique_entity_edge', False):
+        print("unique_entity_edge is True")
         logger.debug("Filtering for unique entities AND unique triggering chunks, counting appearances until limit.")
         seen_entities = set()
         seen_triggering_chunks = set() # Thêm set để theo dõi chunk đã dùng để trigger
@@ -2734,7 +2739,7 @@ async def retrieve_node_details_for_recall(
             entity_name = result.get("entity_name")
             chunk_id = result.get("chunk_id")
             distance = result.get("distance")
-
+            
             # Basic validation before counting or processing
             if entity_name and chunk_id is not None and distance is not None:
                 try:
@@ -2775,12 +2780,13 @@ async def retrieve_node_details_for_recall(
 
     else: # Filter for unique chunks
         logger.debug("Filtering for unique chunks, counting appearances until limit.")
+        print("unique_entity_edge is False")
         seen_chunk_ids = set()
         for result in vdb_results: # Iterate through original VDB results
             entity_name = result.get("entity_name")
-            chunk_id = result.get("chunk_id")
+            chunk_id = result.get("chunk_id", "UNKONWN_CHUNK_ID") # Default to UNKNOWN if not present
             distance = result.get("distance")
-
+            # print("chet o sau day")
             # Basic validation before counting or processing
             if entity_name and chunk_id is not None and distance is not None:
                 try:
@@ -2788,7 +2794,7 @@ async def retrieve_node_details_for_recall(
                 except (ValueError, TypeError):
                     logger.warning(f"Skipping result due to invalid distance: {result}")
                     continue # Skip this result entirely
-
+                # print("hay o day")
                 # Increment counts for the valid result being processed
                 entity_counts[entity_name] += 1
                 chunk_counts[chunk_id] += 1
@@ -2875,13 +2881,13 @@ async def retrieve_node_details_for_recall(
             # Filter out empty strings that might result from splitting
             all_chunk_ids = [cid for cid in all_chunk_ids if cid]
             kg_node_info_map[name] = {
-                "kg_description": kg_node_description, # Description từ KG
+                # "kg_description": kg_node_description, # Description từ KG
                 "all_kg_chunk_ids": all_chunk_ids
             }
         else:
             # Handle case where node wasn't found in KG
             kg_node_info_map[name] = {
-                "kg_description": None, # Không có description từ KG
+                # "kg_description": None, # Không có description từ KG
                 "all_kg_chunk_ids": []
             }
             logger.debug(f"Node '{name}' not found in KG or had no data.")
@@ -2895,7 +2901,7 @@ async def retrieve_node_details_for_recall(
         if kg_info: # Chỉ thêm kết quả nếu tìm thấy thông tin KG tương ứng
             final_output.append({
                 "entity_name": entity_name,
-                "kg_description": kg_info["kg_description"], # Description tổng hợp từ KG node
+                # "kg_description": kg_info["kg_description"], # Description tổng hợp từ KG node
                 "description": vdb_result["vdb_hit_description"], # Description cụ thể từ VDB hit
                 "retrieved_chunk_id": vdb_result["retrieved_chunk_id"],
                 "score": vdb_result["score"],
@@ -3008,7 +3014,7 @@ async def retrieve_edge_details_for_recall(
     edge_counts = Counter() # Đếm (src, tgt)
     chunk_counts = Counter()
     result_chosen = []
-    top_k_candidates = 100 # Giới hạn số lượng kết quả sau khi lọc
+    top_k_candidates = 300 # Giới hạn số lượng kết quả sau khi lọc
 
     if getattr(query_param, 'unique_entity_edge', False): # True nghĩa là unique edge
         logger.debug("Filtering for unique edges AND unique triggering chunks, counting appearances until limit.")
@@ -3195,7 +3201,7 @@ async def retrieve_edge_details_for_recall(
             final_output.append({
                 "src_id": src_id,
                 "tgt_id": tgt_id,
-                "kg_description": kg_info["kg_description"], # Desc từ KG
+                # "kg_description": kg_info["kg_description"], # Desc từ KG
                 "description": vdb_result["vdb_hit_description"], # Desc từ VDB hit
                 "retrieved_chunk_id": vdb_result["retrieved_chunk_id"],
                 "score": vdb_result["score"],
@@ -3229,26 +3235,26 @@ async def retrieve_edge_details_for_recall(
                 }
 
                 # Gắn content vào final_output
-                for item in final_output:
-                    item['all_kg_chunks_content'] = [
-                        chunk_contents_map.get(cid)
-                        for cid in item['all_kg_chunk_ids']
-                        if chunk_contents_map.get(cid) is not None
-                    ]
-                    # Thêm một key rỗng nếu không fetch được gì
-                    if 'all_kg_chunks_content' not in item:
-                        item['all_kg_chunks_content'] = []
+                # for item in final_output:
+                #     item['all_kg_chunks_content'] = [
+                #         chunk_contents_map.get(cid)
+                #         for cid in item['all_kg_chunk_ids']
+                #         if chunk_contents_map.get(cid) is not None
+                #     ]
+                #     # Thêm một key rỗng nếu không fetch được gì
+                #     if 'all_kg_chunks_content' not in item:
+                #         item['all_kg_chunks_content'] = []
 
             except Exception as e:
                 logger.error(f"Error fetching chunk content from text_chunks_db: {e}", exc_info=True)
                 # Gán giá trị mặc định hoặc None nếu lỗi
-                for item in final_output:
-                    item['all_kg_chunks_content'] = None # Hoặc [] tùy logic mong muốn
+                # for item in final_output:
+                #     item['all_kg_chunks_content'] = None # Hoặc [] tùy logic mong muốn
         else:
              logger.debug("No KG chunk IDs found to fetch content for.")
              # Đảm bảo key tồn tại nếu không có gì để fetch
-             for item in final_output:
-                 item['all_kg_chunks_content'] = []
+            #  for item in final_output:
+            #      item['all_kg_chunks_content'] = []
 
 
     # Sắp xếp kết quả cuối cùng theo score (distance thấp hơn là tốt hơn)
@@ -3293,18 +3299,26 @@ async def kg_direct_recall(
             - The extracted high-level keywords.
             - The extracted low-level keywords.
     """
-    logger.info(f"Executing kg_direct_recall with mode: {query_param.mode}")
+    logger.info(f"Executing kg_direct_recall with mode: {query_param}")
 
     # 1. Extract Keywords
     try:
-        hl_keywords_list, ll_keywords_list = await extract_keywords_only(
-            text=query,
-            param=query_param,
-            global_config=global_config,
-            hashing_kv=hashing_kv
-        )
-        hl_keywords_str = ", ".join(hl_keywords_list)
-        ll_keywords_str = ", ".join(ll_keywords_list)
+        cache_keywords = is_query_cached(query,global_config["cache_queries"])
+        if not query_param.use_query_for_retrieval:
+            hl_keywords_list, ll_keywords_list = await extract_keywords_only(
+                text=query,
+                param=query_param,
+                global_config=global_config,
+                hashing_kv=hashing_kv,
+                cache_keywords=cache_keywords
+            )
+            hl_keywords_str = ", ".join(hl_keywords_list)
+            ll_keywords_str = ", ".join(ll_keywords_list)
+        else:
+            ll_keywords_str, hl_keywords_str = query, query
+            hl_keywords_list = [query]
+            ll_keywords_list = [query]
+            
         logger.debug(f"Extracted keywords for kg_direct_recall: HL='{hl_keywords_str}', LL='{ll_keywords_str}'")
     except Exception as e:
         logger.error(f"Error extracting keywords in kg_direct_recall: {e}", exc_info=True)
@@ -3316,8 +3330,20 @@ async def kg_direct_recall(
         return [], [], [] # Return empty lists for all parts of the tuple
 
     # Determine query strings for recall functions based on extracted keywords
-    node_query_str = ll_keywords_str or hl_keywords_str # Fallback for node query
-    edge_keywords_str = hl_keywords_str # Edge recall specifically uses HL keywords
+    if not query_param.ll_keyword_only:
+        node_query_str = ll_keywords_str or hl_keywords_str # Fallback for node query
+        edge_keywords_str = hl_keywords_str # Edge recall specifically uses HL keywords
+    else:
+        if ll_keywords_str:
+            node_query_str = ll_keywords_str
+        else:
+            node_query_str = hl_keywords_str
+
+        if ll_keywords_str:
+            edge_keywords_str = ll_keywords_str
+        else:
+            edge_keywords_str = hl_keywords_str
+
 
     # 2. Schedule Recall Tasks based on mode and available keywords
     recall_tasks = []
@@ -3392,8 +3418,59 @@ async def kg_direct_recall(
             logger.warning(f"Edge recall task returned unexpected type: {type(result)}")
 
     # Sort combined list by score
-    final_candidates.sort(key=lambda x: x.get('score', float('inf')))
+    final_candidates.sort(key=lambda x: x.get('score', float('inf')), reverse=True)
 
     logger.info(f"kg_direct_recall completed, returning {len(final_candidates)} combined candidates after keyword extraction.")
     return final_candidates, hl_keywords_list, ll_keywords_list
 # <<< END NEW DIRECT RECALL FUNCTION >>>
+
+async def _most_relevant_text_chunks_from_nodes(
+        query : str,
+        knowledge_graph_inst: BaseGraphStorage,
+        entities_vdb: BaseVectorStorage,
+        node: str,
+        threshold: int = None
+):  
+    node_data = await knowledge_graph_inst.get_node_data(node)
+    list_hash_id = [compute_mdhash_id(node + des,prefix="ent-") for des in list(node_data["description"].split("<SEP>"))]
+    filter_lambda = lambda x : x["__id__"] in list_hash_id
+
+    result = await entities_vdb.query(query, top_k=1, filter_lambda = filter_lambda)
+    result = result[0]
+    if  threshold:
+        if result["distance"] < threshold:
+            return None
+
+    return result["chunk_id"]
+
+async def _most_relevant_text_chunks_from_edges(
+        query : str,
+        knowledge_graph_inst: BaseGraphStorage,
+        relation_vdb: BaseVectorStorage,
+        head : str, 
+        tgt : str,
+        threshold: int = None
+):  
+    try:
+        edge_data = await knowledge_graph_inst.get_edge_data(head, tgt)
+    except:
+        edge_data = await knowledge_graph_inst.get_edge_data(tgt,head)
+
+    list_hash_id = [compute_mdhash_id(head + tgt + des,prefix="rel-") for des in list(edge_data["description"].split("<SEP>"))]
+    list_hash_id_reverse = [compute_mdhash_id(tgt + + des,prefix="rel-") for des in list(edge_data["description"].split("<SEP>"))]
+
+    filter_lambda = lambda x : x["__id__"] in list_hash_id
+    filter_lambda_reverse = lambda x : x["__id__"] in list_hash_id_reverse
+
+
+    try:
+        result = await relation_vdb.query(query, top_k=1, filter_lambda = filter_lambda)
+    except:
+        result = await relation_vdb.query(query, top_k=1, filter_lambda = filter_lambda_reverse)
+
+    result = result[0]
+    if threshold:
+        if result["distance"] < threshold:
+            return None
+
+    return  result["chunk_id"]

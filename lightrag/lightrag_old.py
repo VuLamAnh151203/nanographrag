@@ -34,7 +34,9 @@ from .operate_old import (
     _merge_nodes_then_upsert,
     _merge_edges_then_upsert,
     naive_retrieval,
-    kg_direct_recall, # New function returning (candidates, hl_keywords, ll_keywords)
+    kg_direct_recall,
+    _most_relevant_text_chunks_from_nodes,
+    _most_relevant_text_chunks_from_edges # New function returning (candidates, hl_keywords, ll_keywords)
 
 )
 
@@ -4755,3 +4757,74 @@ class LightRAG:
 
         # Return the tuple directly
         return candidates, hl_keywords, ll_keywords
+    
+    def _most_relevant_text_chunks_from_nodes(
+        self,
+        query: str,
+        list_nodes: list[str],
+        threshold : int
+    ) -> dict[str, str]:
+
+        loop = always_get_an_event_loop()
+
+        return loop.run_until_complete(self.a_most_relevant_text_chunks_from_nodes(query,list_nodes,threshold))
+
+    async def a_most_relevant_text_chunks_from_nodes(
+        self,
+        query: str,
+        list_nodes: list[str],
+        threshold: int
+    ) -> dict[str, str]:
+
+        list_chunk_id  = []
+        for node in list_nodes:
+            list_chunk_id.append(await _most_relevant_text_chunks_from_nodes(query,
+                                                    self.chunk_entity_relation_graph,
+                                                    self.entities_vdb,
+                                                    node,
+                                                    threshold
+                                                    ) 
+            )
+
+
+        results = {}
+        for i in range(len(list_chunk_id)):
+            results[list_nodes[i]] = list_chunk_id[i]
+
+        return results
+
+
+    def _most_relevant_text_chunks_from_edges(
+        self,
+        query: str,
+        list_edges: list[(str, str)],
+        threshold : int
+    ) -> dict[str, str]:
+
+        loop = always_get_an_event_loop()
+
+        return loop.run_until_complete(self.a_most_relevant_text_chunks_from_edges(query,list_edges,threshold))
+
+    async def a_most_relevant_text_chunks_from_edges(
+        self,
+        query: str,
+        list_edges: list[(str, str)],
+        threshold: int
+    ) -> dict[str, str]:
+
+        list_chunk_id = [] 
+        for head, tgt in list_edges:
+            list_chunk_id.append(await _most_relevant_text_chunks_from_edges(query,
+                                                        self.chunk_entity_relation_graph,
+                                                        self.relationships_vdb,
+                                                        head,
+                                                        tgt,
+                                                        threshold
+                                                        )
+            )
+
+        results = {}
+        for i in range(len(list_chunk_id)):
+            results[(list_edges[i][0], list_edges[i][1])] = list_chunk_id[i]
+
+        return results

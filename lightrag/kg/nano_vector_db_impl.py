@@ -163,7 +163,7 @@
             
 import asyncio
 import os
-from typing import Any, final, Dict, List, Tuple
+from typing import Any, final, Dict, List,TypedDict, Callable, Tuple
 from dataclasses import dataclass
 import numpy as np
 import json
@@ -189,6 +189,9 @@ except ImportError as e:
     raise ImportError(
         "`nano-vectordb` library is not installed. Please install it via pip: `pip install nano-vectordb`."
     ) from e
+
+Data = TypedDict("Data", {"__id__": str, "__vector__": np.ndarray})
+ConditionLambda = Callable[[Data], bool]
 
 def buffer_string_to_array(base64_str: str, dtype=np.float32) -> np.ndarray:
     """Convert base64 encoded string to numpy array."""
@@ -391,7 +394,7 @@ def load_vdb_data(file_path: str) -> Dict[str, Any]:
         logger.error(f"Error loading VDB file {file_path}: {e}")
         raise
 
-def find_vdb_entry_pairs(vdb1: Dict[str, Any], vdb2: Dict[str, Any], threshold: float = 0.8) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
+def find_vdb_entry_pairs(vdb1: Dict[str, Any], vdb2: Dict[str, Any], threshold: float = 0.8, max_threshold: float = 1.0) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
     """
     Find similar entry pairs between two VDBs based on cosine similarity.
 
@@ -516,13 +519,14 @@ class NanoVectorDBStorage(BaseVectorStorage):
                 f"embedding is not 1-1 with data, {len(embeddings)} != {len(list_data)}"
             )
 
-    async def query(self, query: str, top_k: int) -> list[dict[str, Any]]:
+    async def query(self, query: str, top_k: int, filter_lambda: ConditionLambda = None) -> list[dict[str, Any]]:
         embedding = await self.embedding_func([query])
         embedding = embedding[0]
         results = self._client.query(
             query=embedding,
             top_k=top_k,
             better_than_threshold=self.cosine_better_than_threshold,
+            filter_lambda = filter_lambda
         )
         results = [
             {
@@ -627,7 +631,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
             logger.error(f"Error finding and storing similar pairs: {e}")
             raise
 
-    async def find_similar_vdb_pairs(self, vdb1_path: str, vdb2_path: str, threshold: float = 0.8) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
+    async def find_similar_vdb_pairs(self, vdb1_path: str, vdb2_path: str, threshold: float = 0.8, max_threshold: float = 1) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
         """
         Loads two VDB files and finds pairs of entries with similarity above a threshold.
 
@@ -650,7 +654,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
             # if it blocks the event loop for too long, although numpy operations
             # often release the GIL. For simplicity, calling directly here.
             # Consider asyncio.to_thread if performance becomes an issue.
-            pairs = find_vdb_entry_pairs(vdb1, vdb2, threshold)
+            pairs = find_vdb_entry_pairs(vdb1, vdb2, threshold, max_threshold)
 
             logger.info(f"Found {len(pairs)} similar pairs between VDBs above threshold {threshold}.")
             return pairs

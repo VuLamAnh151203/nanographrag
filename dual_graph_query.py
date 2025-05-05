@@ -274,7 +274,8 @@ class DualGraphQuery:
         mapping_file_path: str,
         output_dir: str = "query_results",
         graph1_name: str = "graph1",
-        graph2_name: str = "graph2"
+        graph2_name: str = "graph2",
+        mapping_sym_file: Optional[str] = None
     ):
         """
         Initialize dual graph querying with two LightRAG instances and entity mapping.
@@ -293,6 +294,7 @@ class DualGraphQuery:
         self.output_dir = output_dir
         self.graph1_name = graph1_name
         self.graph2_name = graph2_name
+        self.mapping_sym_file = mapping_sym_file
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -308,7 +310,9 @@ class DualGraphQuery:
         query_text: str,
         mode: str = "hybrid",
         param: Optional[QueryParam] = None,
-        save_results: bool = True
+        save_results: bool = True,
+        sym: bool = False,
+        max_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Query both graphs and return consolidated results.
@@ -324,7 +328,7 @@ class DualGraphQuery:
         """
         loop = always_get_an_event_loop()
         return loop.run_until_complete(
-            self.aquery(query_text, mode, param, save_results)
+            self.aquery(query_text, mode, param, save_results, sym=sym, max_threshold=max_threshold)
         )
     
     async def aquery(
@@ -332,7 +336,10 @@ class DualGraphQuery:
         query_text: str,
         mode: str = "hybrid",
         param: Optional[QueryParam] = None,
-        save_results: bool = True
+        save_results: bool = True,
+        sym: bool = False,
+        index: Optional[int] = None,
+        max_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Async version of query method.
@@ -358,30 +365,32 @@ class DualGraphQuery:
         
         # Map entities from graph2 to graph1
         mapped_graph2_results = self._map_graph2_to_graph1(graph2_results)
+        mapped_graph1_results= None
+        if sym:
+            
+            mapped_graph1_results = await  self._map_graph1_to_graph1(graph1_results, query_text=query_text, max_threshold=max_threshold)
         
         # Merge results
         consolidated_results = self._merge_results(
             graph1_results, 
-            mapped_graph2_results
+            mapped_graph2_results,
+            mapped_graph1_results,
         )
         
         # Calculate metrics
-        metrics = self._calculate_metrics(consolidated_results)
+        
         
         # Create final result object
         result = {
             "query": query_text,
             "mode": param.mode,
             "candidates": consolidated_results,
-            "metrics": metrics,
-            "graph1_raw_results": graph1_results,
             "graph2_raw_results": graph2_results,
-            "timestamp": self._get_timestamp()
         }
         
         # Save results if requested
         if save_results:
-            self._save_results(result, query_text)
+            self._save_results(result, query_text, index)
         
         return result
     
@@ -411,7 +420,7 @@ class DualGraphQuery:
         mapped_candidates = []
         
         for candidate in candidates:
-            cand_type = candidate.get("type")
+            cand_type = candidate.get("retrieval_type")
             
             if cand_type == "node":
                 # Map entity node
@@ -428,17 +437,21 @@ class DualGraphQuery:
                 )
                 
                 if mapped_result:
-                    mapped_entity, mapped_desc = mapped_result
+                    print("mapp cross ne")
+                    mapped_entity, mapped_desc, mapped_chunkid = mapped_result
                     mapped_candidate = candidate.copy()
                     mapped_candidate["entity_name"] = mapped_entity
                     mapped_candidate["description"] = mapped_desc
                     mapped_candidate["original_entity"] = entity_name
-                    mapped_candidate["mapping_source"] = self.graph2_name
+                    mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
+                    mapped_candidate["mapping_status"] = "mapped_success"
+                    # mapped_candidate["mapping_source"] = self.graph2_name
+                    
                     mapped_candidates.append(mapped_candidate)
                 else:
                     # Keep original if no mapping found, but mark it
                     candidate["mapping_status"] = "unmapped"
-                    mapped_candidates.append(candidate)
+                    # mapped_candidates.append(candidate)
                     
             elif cand_type == "edge":
                 # Map edge
@@ -457,76 +470,153 @@ class DualGraphQuery:
                 )
                 
                 if mapped_result:
-                    mapped_src, mapped_tgt, mapped_desc = mapped_result
+                    print("mapp cross ne")
+                    mapped_src, mapped_tgt, mapped_desc, mapped_chunkid = mapped_result
                     mapped_candidate = candidate.copy()
                     mapped_candidate["src_id"] = mapped_src
                     mapped_candidate["tgt_id"] = mapped_tgt
                     mapped_candidate["description"] = mapped_desc
                     mapped_candidate["original_src"] = src_entity
                     mapped_candidate["original_tgt"] = tgt_entity
-                    mapped_candidate["mapping_source"] = self.graph2_name
+                    mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
+                    mapped_candidate["mapping_status"] = "mapped_success"
+                    # mapped_candidate["mapping_source"] = self.graph2_name
                     mapped_candidates.append(mapped_candidate)
                 else:
                     # Keep original if no mapping found, but mark it
                     candidate["mapping_status"] = "unmapped"
-                    mapped_candidates.append(candidate)
+                    # mapped_candidates.append(candidate)
             else:
                 # For other types, keep as is
                 mapped_candidates.append(candidate)
         
         return mapped_candidates, hl_keywords, ll_keywords
+
+    async  def _map_graph1_to_graph1(
+        self, 
+        graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]],
+        query_text: str = None,
+        max_threshold: Optional[float] = None
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+        """Map entities and edges from graph2 to graph1 using the mapping file."""
+        candidates, hl_keywords, ll_keywords = graph2_results
+        mapped_candidates = []
+        
+        for candidate in candidates:
+            cand_type = candidate.get("retrieval_type")
+            
+            if cand_type == "node":
+                # Map entity node
+                entity_name = candidate.get("entity_name")
+                description = candidate.get("description", "")
+                
+                # Use entity mapping
+                mapped_result = find_mapped_entity_description(
+                    self.mapping_sym_file,
+                    entity_name,
+                    description,
+                    source_graph_key_prefix=self.graph2_name,
+                    target_graph_key_prefix=self.graph1_name
+                )
+                
+                if mapped_result:
+                    mapped_entity, mapped_desc, _ = mapped_result
+                    chunk_id = await  self.graph1.a_most_relevant_text_chunks_from_nodes(query = query_text, list_nodes = [mapped_entity], threshold=max_threshold)
+                    chunk_id = chunk_id[mapped_entity] if chunk_id else None
+                    if chunk_id:
+                        print("mapp sym ne")
+                        mapped_candidate = candidate.copy()
+                        mapped_candidate["entity_name"] = mapped_entity
+                        mapped_candidate["description"] = mapped_desc
+                        mapped_candidate["original_entity"] = entity_name
+                        mapped_candidate['retrieved_chunk_id'] = chunk_id
+                        mapped_candidate["mapping_status"] = "mapped_sym_success"
+                        mapped_candidates.append(mapped_candidate)
+                else:
+                    # Keep original if no mapping found, but mark it
+                    candidate["mapping_status"] = "unmapped"
+                    # mapped_candidates.append(candidate)
+                    
+            elif cand_type == "edge":
+                # Map edge
+                src_entity = candidate.get("src_id")
+                tgt_entity = candidate.get("tgt_id")
+                description = candidate.get("description", "")
+                
+                # Use edge mapping
+                mapped_result = find_mapped_edge_description(
+                    self.mapping_file,
+                    src_entity,
+                    tgt_entity,
+                    description,
+                    source_graph_key_prefix=self.graph2_name,
+                    target_graph_key_prefix=self.graph1_name
+                )
+                
+                if mapped_result:
+                    mapped_src, mapped_tgt, mapped_desc,_ = mapped_result
+                    chunk_id = await  self.graph1.a_most_relevant_text_chunks_from_edges(query = query_text, list_edges = [(mapped_src,mapped_tgt)], threshold=max_threshold)
+                    mapped_chunkid = chunk_id[(mapped_src,mapped_tgt)] if chunk_id else None
+                    if mapped_chunkid:
+                        print("mapp sym ne")
+                        mapped_candidate = candidate.copy()
+                        mapped_candidate["src_id"] = mapped_src
+                        mapped_candidate["tgt_id"] = mapped_tgt
+                        mapped_candidate["description"] = mapped_desc
+                        mapped_candidate["original_src"] = src_entity
+                        mapped_candidate["original_tgt"] = tgt_entity
+                        mapped_candidate['retrieved_chunk_id'] = mapped_chunkid
+                        mapped_candidate["mapping_status"] = "mapped_sym_success"
+                        mapped_candidates.append(mapped_candidate)
+                else:
+                    # Keep original if no mapping found, but mark it
+                    candidate["mapping_status"] = "unmapped"
+                    # mapped_candidates.append(candidate)
+            else:
+                # For other types, keep as is
+                mapped_candidates.append(candidate)
+        
+        return mapped_candidates, hl_keywords, ll_keywords
+
+
     
     def _merge_results(
         self,
         graph1_results: Tuple[List[Dict[str, Any]], List[str], List[str]],
-        graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]]
+        graph2_results: Tuple[List[Dict[str, Any]], List[str], List[str]],
+        mapped_graph1_results: Optional[Tuple[List[Dict[str, Any]], List[str], List[str]]] = None
     ) -> List[Dict[str, Any]]:
         """Merge results from both graphs, sorting by score."""
         candidates1, _, _ = graph1_results
         candidates2, _, _ = graph2_results
         
+        
         # Combine candidates
         all_candidates = candidates1 + candidates2
+        
+        if mapped_graph1_results:
+            mapped_candidates1, _, _ = mapped_graph1_results
+            all_candidates += mapped_candidates1
         
         # Sort by score in descending order
         sorted_candidates = sorted(
             all_candidates, 
-            key=lambda x: x.get("relevance_score", 0.0), 
+            key=lambda x: x.get("score", 0.0), 
             reverse=True
         )
         
         return sorted_candidates
     
-    def _calculate_metrics(self, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate recall metrics for nodes and chunks."""
-        node_count = 0
-        edge_count = 0
-        chunk_count = len(set(c.get("chunk_id") for c in candidates if c.get("chunk_id")))
-        
-        for candidate in candidates:
-            if candidate.get("type") == "node":
-                node_count += 1
-            elif candidate.get("type") == "edge":
-                edge_count += 1
-        
-        return {
-            "node_count": node_count,
-            "edge_count": edge_count,
-            "chunk_count": chunk_count,
-            "total_candidates": len(candidates)
-        }
     
-    def _get_timestamp(self) -> str:
-        """Get current timestamp string."""
-        from datetime import datetime
-        return datetime.now().isoformat()
-    
-    def _save_results(self, result: Dict[str, Any], query_text: str) -> str:
+    def _save_results(self, result: Dict[str, Any], query_text: str, index: None) -> str:
         """Save results to a JSONL file and return the path."""
         # Create a sanitized filename from the query
-        sanitized_query = "".join(c if c.isalnum() else "_" for c in query_text[:30])
-        timestamp = result["timestamp"].replace(":", "-").replace(".", "-")
-        filename = f"query_{sanitized_query}_{timestamp}.jsonl"
+        # sanitized_query = "".join(c if c.isalnum() else "_" for c in query_text[:30])
+        # timestamp = result["timestamp"].replace(":", "-").replace(".", "-")
+        if index is not None:
+            filename = f"query_{str(index)}.jsonl"
+        else:
+            filename = f"query_{query_text[:30].replace(' ', '_')}.jsonl"
         filepath = os.path.join(self.output_dir, filename)
         
         # Write to JSONL
@@ -542,7 +632,9 @@ class DualGraphQuery:
         mode: str = "hybrid",
         param: Optional[QueryParam] = None,
         save_results: bool = True,
-        batch_output_file: Optional[str] = None
+        batch_output_file: Optional[str] = None,
+        sym: bool = False, 
+        max_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Run multiple queries in batch mode and return consolidated results.
@@ -559,7 +651,7 @@ class DualGraphQuery:
         """
         loop = always_get_an_event_loop()
         return loop.run_until_complete(
-            self.abatch_query(queries, mode, param, save_results, batch_output_file)
+            self.abatch_query(queries, mode, param, save_results, batch_output_file,sym=sym, max_threshold=max_threshold)
         )
     
     async def abatch_query(
@@ -568,7 +660,9 @@ class DualGraphQuery:
         mode: str = "hybrid",
         param: Optional[QueryParam] = None,
         save_results: bool = True,
-        batch_output_file: Optional[str] = None
+        batch_output_file: Optional[str] = None,
+        sym: bool = False,
+        max_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Async version of batch_query method.
@@ -582,7 +676,10 @@ class DualGraphQuery:
                 query_text=query_text,
                 mode=mode,
                 param=param,
-                save_results=save_results
+                save_results=save_results,
+                sym=sym,
+                index=i+1,
+                max_threshold=max_threshold
             )
             all_results.append(result)
         
@@ -609,15 +706,16 @@ if __name__ == "__main__":
     parser.add_argument("--graph1_path", required=True, help="Path to first graph's data directory")
     parser.add_argument("--graph2_path", required=True, help="Path to second graph's data directory")
     parser.add_argument("--mapping_file", required=True, help="Path to entity/edge mapping file")
+    parser.add_argument("--mapping_sym_file", default=None, help="Path to entity/edge mapping file")
     parser.add_argument("--output_dir", default="query_results", help="Directory to save results")
     parser.add_argument("--graph1_name", default="graph1", help="Name for first graph")
     parser.add_argument("--graph2_name", default="graph2", help="Name for second graph")
     parser.add_argument("--batch_output", help="Filename for combined batch results (for batch mode)")
-    parser.add_argument("--embedding_func", default="sentence-transformers/all-MiniLM-L6-v2", 
+    parser.add_argument("--embedding_func_name", default="sentence-transformers/all-MiniLM-L6-v2", 
                         help="Embedding model to use for both graphs")
-    parser.add_argument("--embedding_path_graph1", default="graph1", help="Name for first graph")
-    parser.add_argument("--embedding_path_graph2", default="graph2", help="Name for second graph")
+    parser.add_argument("--embedding_path", default="graph1", help="Name for first graph")
     parser.add_argument('--devices', nargs='+', help='List of CUDA devices')
+    parser.add_argument("--threshold_sym", type=float, default=None)
     
     args = parser.parse_args()
     
@@ -628,17 +726,17 @@ if __name__ == "__main__":
 
     graph1 = init_rag(
         working_dir=args.graph1_path,
-        embedding_path=args.embedding_path_graph1,
-        embedding_func_name=args.embedding_func, 
+        embedding_path=args.embedding_path,
+        embedding_func_name=args.embedding_func_name, 
         devices=args.devices,
-        embedding_func=embedding_func
+        # embedding_func=embedding_func
     )
     graph2 = init_rag(
         working_dir=args.graph2_path,
-        embedding_path=args.embedding_path_graph2,
-        embedding_func_name=args.embedding_func, 
+        embedding_path=args.embedding_path,
+        embedding_func_name=args.embedding_func_name, 
         devices=args.devices,
-        embedding_func=embedding_func
+        # embedding_func=embedding_func
     )
     
     # Create dual query instance
@@ -648,7 +746,8 @@ if __name__ == "__main__":
         mapping_file_path=args.mapping_file,
         output_dir=args.output_dir,
         graph1_name=args.graph1_name,
-        graph2_name=args.graph2_name
+        graph2_name=args.graph2_name,
+        mapping_sym_file=args.mapping_sym_file
     )
     
     # Determine if running in single query or batch mode
@@ -657,7 +756,9 @@ if __name__ == "__main__":
         results = dual_query.query(
             query_text=args.query,
             mode=args.mode,
-            save_results=True
+            save_results=True,
+            sym=args.mapping_sym_file is not None,
+            max_threshold=args.threshold_sym
         )
         
         
@@ -672,7 +773,9 @@ if __name__ == "__main__":
             queries=queries,
             mode=args.mode,
             save_results=True,
-            batch_output_file=args.batch_output
+            batch_output_file=args.batch_output,
+            sym=args.mapping_sym_file is not None,
+            max_threshold=args.threshold_sym
         )
         
         # Print summary

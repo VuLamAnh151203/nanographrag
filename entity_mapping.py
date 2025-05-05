@@ -8,22 +8,22 @@ from pathlib import Path
 import numpy as np
 
 # Import necessary components from lightrag
-try:
-    from lightrag.kg.nano_vector_db_impl import NanoVectorDBStorage
-    from lightrag.utils import logger
-except ImportError as e:
-    print(f"Error importing lightrag components: {e}")
-    print("Please ensure lightrag and entity_mapping are available.")
-    # Define logger as a basic logger if import fails, to allow script structure
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
-    # Define NanoVectorDBStorage as a dummy if import fails
-    class NanoVectorDBStorage:
-        def __init__(self, *args, **kwargs):
-            logger.error("Failed to import NanoVectorDBStorage. Using dummy.")
-        async def find_similar_vdb_pairs(self, *args, **kwargs):
-            logger.error("find_similar_vdb_pairs not available due to import error.")
-            return []
+# try:
+from lightrag.kg.nano_vector_db_impl import NanoVectorDBStorage
+from lightrag.utils import logger
+# except ImportError as e:
+#     print(f"Error importing lightrag components: {e}")
+#     print("Please ensure lightrag and entity_mapping are available.")
+#     # Define logger as a basic logger if import fails, to allow script structure
+#     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+#     logger = logging.getLogger(__name__)
+#     # Define NanoVectorDBStorage as a dummy if import fails
+#     class NanoVectorDBStorage:
+#         def __init__(self, *args, **kwargs):
+#             logger.error("Failed to import NanoVectorDBStorage. Using dummy.")
+#         async def find_similar_vdb_pairs(self, *args, **kwargs):
+#             logger.error("find_similar_vdb_pairs not available due to import error.")
+#             return []
 
 
 class DummyEmbedding:
@@ -47,7 +47,8 @@ async def map_elements_between_graphs(
     output_dir: str,
     threshold: float = 0.8,
     vdb_config: Optional[Dict[str, Any]] = None, # Made optional
-    embedding_dim: int = 768
+    embedding_dim: int = 768,
+    max_threshold: float = 1.0
 ) -> str:
     """
     Map entities AND edges between two knowledge graphs based on VDB similarity.
@@ -100,7 +101,8 @@ async def map_elements_between_graphs(
         entity_vdb_pairs = await vdb_storage.find_similar_vdb_pairs(
             graph1_entity_vdb_path,
             graph2_entity_vdb_path,
-            threshold
+            threshold,
+            max_threshold=max_threshold
         )
         logger.info(f"Processing {len(entity_vdb_pairs)} potential entity pairs...")
 
@@ -116,7 +118,8 @@ async def map_elements_between_graphs(
         edge_vdb_pairs = await vdb_storage.find_similar_vdb_pairs(
             graph1_edge_vdb_path,
             graph2_edge_vdb_path,
-            threshold
+            threshold,
+            max_threshold=max_threshold
         )
         logger.info(f"Processing {len(edge_vdb_pairs)} potential edge pairs...")
 
@@ -255,11 +258,12 @@ def find_mapped_entity_description(
     normalized_input_entity = str(input_entity_name).strip().lower()
     normalized_input_desc = str(input_description).strip()
 
-    source_entity_key = f"{source_graph_key_prefix}_entity_name"
-    source_desc_key = f"{source_graph_key_prefix}_trigger_description"
-    target_entity_key = f"{target_graph_key_prefix}_entity_name"
-    target_desc_key = f"{target_graph_key_prefix}_trigger_description"
-
+    source_entity_key = "graph1_entity_name"
+    source_desc_key = "graph1_trigger_description"
+    target_entity_key = "graph2_entity_name"
+    target_desc_key = "graph2_trigger_description"
+    chunkid = "graph2_trigger_chunk_id"
+    
     for mapping in all_mappings:
         if mapping.get("type") == "entity":
             source_entity = mapping.get(source_entity_key)
@@ -274,10 +278,10 @@ def find_mapped_entity_description(
 
                     mapped_entity = mapping.get(target_entity_key)
                     mapped_desc = mapping.get(target_desc_key)
-
+                    mapped_chunkid = mapping.get(chunkid)
                     if mapped_entity is not None and mapped_desc is not None:
                         logger.debug(f"Found entity match: '{input_entity_name}' -> '{mapped_entity}'")
-                        return str(mapped_entity), str(mapped_desc)
+                        return str(mapped_entity), str(mapped_desc), str(mapped_chunkid)
                     else:
                         logger.warning(f"Source matched but target keys missing: {mapping}")
 
@@ -318,12 +322,15 @@ def find_mapped_edge_description(
     normalized_input_tgt = str(input_tgt_entity).strip().lower()
     normalized_input_desc = str(input_description).strip()
 
-    source_src_key = f"{source_graph_key_prefix}_src_entity"
-    source_tgt_key = f"{source_graph_key_prefix}_tgt_entity"
-    source_desc_key = f"{source_graph_key_prefix}_trigger_description"
-    target_src_key = f"{target_graph_key_prefix}_src_entity"
-    target_tgt_key = f"{target_graph_key_prefix}_tgt_entity"
-    target_desc_key = f"{target_graph_key_prefix}_trigger_description"
+    source_src_key = "graph1_src_entity"
+    source_tgt_key = "graph1_tgt_entity"
+    source_desc_key = "graph1_trigger_description"
+    
+    target_src_key = "graph2_src_entity"
+    target_tgt_key = "graph2_tgt_entity"
+    target_desc_key = "graph2_trigger_description"
+
+    chunkid = "graph2_trigger_chunk_id"
 
     for mapping in all_mappings:
         if mapping.get("type") == "edge":
@@ -343,10 +350,10 @@ def find_mapped_edge_description(
                     mapped_src = mapping.get(target_src_key)
                     mapped_tgt = mapping.get(target_tgt_key)
                     mapped_desc = mapping.get(target_desc_key)
-
+                    mapped_chunkid = mapping.get(chunkid)
                     if mapped_src is not None and mapped_tgt is not None and mapped_desc is not None:
                         logger.debug(f"Found edge match: ({input_src_entity} -> {input_tgt_entity}) -> ({mapped_src} -> {mapped_tgt})")
-                        return str(mapped_src), str(mapped_tgt), str(mapped_desc)
+                        return str(mapped_src), str(mapped_tgt), str(mapped_desc), str(mapped_chunkid)
                     else:
                         logger.warning(f"Source matched but target keys missing: {mapping}")
 
@@ -371,6 +378,7 @@ def main():
     parser.add_argument("--output", required=True, help="Directory to save mapping results")
     parser.add_argument("--threshold", type=float, default=0.8, help="Similarity threshold")
     parser.add_argument("--embedding_dim", type=int, default=1024, help="Dimension of embeddings used in VDBs")
+    parser.add_argument("--max_threshold", type=float, default=1, help="Similarity threshold")
 
     args = parser.parse_args()
 
@@ -398,7 +406,8 @@ def main():
                 output_dir=args.output,
                 threshold=args.threshold,
                 vdb_config=vdb_storage_config,
-                embedding_dim=args.embedding_dim
+                embedding_dim=args.embedding_dim,
+                max_threshold=args.max_threshold
             )
         )
         logger.info(f"Mapping process finished. Results are in: {output_file}")
